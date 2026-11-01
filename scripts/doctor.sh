@@ -2063,7 +2063,7 @@ CASES
     chmod +x "$sk/procps/pkill" "$sk/bsd/pkill"
     while IFS='|' read -r skkind skw skl skc; do
       [ -n "$skkind" ] || continue
-      skcode=0
+      skcode=0; skc=$(printf '%b' "$skc")   # multi-line commands (heredocs) are written as \n in the table
       skerr=$(jq -nc --arg c "$skc" '{tool_name:"Bash",tool_input:{command:$c}}' \
         | env -i PATH="$sk/$skkind:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sk/proj" ORANGEKIT_STATE_DIR="$sk/proj/.state" \
             bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || skcode=$?
@@ -2081,6 +2081,11 @@ procps|0|^-anchored pattern (cannot match the shell command line)|kill $(pgrep -
 procps|0|pkill without -f (process name)|pkill node
 procps|0|pgrep -f without kill (lookup only)|pgrep -f "node server.mjs"; echo listed
 procps|0|text inside a message|echo "pkill -f server.mjs"
+procps|2|pgrep -f → kill in a for loop [gstack r5]|for p in $(pgrep -f next-server); do kill $p; done; sleep 1; npm start
+procps|0|pgrep -f in a for loop (lookup only)|for p in $(pgrep -f next-server); do echo $p; done
+procps|2|script written by a heredoc and run right away [B5 r5]|cat > /tmp/restart.sh <<'EOF'\nfor p in $(pgrep -f "node server.mjs"); do kill "$p"; done\nEOF\nchmod +x /tmp/restart.sh && /tmp/restart.sh 3200
+procps|2|heredoc script run with bash [A r6]|cat > scripts/dev-restart.sh <<'EOF'\npkill -f "node server.mjs" || true\nEOF\nbash scripts/dev-restart.sh
+procps|0|heredoc script only written (runs later under another command line)|cat > scripts/dev-restart.sh <<'EOF'\npkill -f "node server.mjs" || true\nEOF\nchmod +x scripts/dev-restart.sh
 bsd|0|BSD pkill excludes its ancestors, so it passes|npm run db:migrate | tail -1; pkill -f "node server.mjs"; npm run build
 bsd|0|pgrep result piped to xargs kill on BSD|pgrep -f vitest | xargs kill -9
 SKCASES

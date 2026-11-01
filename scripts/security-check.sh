@@ -992,10 +992,41 @@ _self_kill_patterns() (
         killed = 0
         if (i > 1 && t[i - 1] == "$(") for (k = i - 2; k >= 1 && t[k] !~ /^[;&|]$/; k--) if (t[k] == "kill") killed = 1
         for (k = j + 1; k <= n && t[k] !~ /^[;&]$/; k++) if (t[k] == "|") { for (m = k + 1; m <= n && t[m] !~ /^[;&|]$/; m++) if (t[m] == "kill") killed = 1; break }
+        # `for p in $(pgrep -f PAT); do kill $p; done` — the kill in the loop body receives it
+        if (!killed && i > 4 && t[i - 1] == "$(" && t[i - 2] == "in" && t[i - 4] == "for") {
+          for (k = j + 1; k <= n && t[k] != "do"; k++) ;
+          for (; k <= n && t[k] != "done"; k++) if (t[k] == "kill") killed = 1
+        }
         if (!killed) continue
       }
       print pat
     } }'
+)
+# When a script written by a heredoc is **run in the same command**, its body is also on this shell's command line —
+# a `pkill -f PAT` in the body kills the outer shell (measured: benchmark OrangeKit run5 stage 1 `cat > /tmp/restart.sh <<EOF … EOF; /tmp/restart.sh`).
+# A script that is only written, not run, runs later under another command line, so it is not emitted
+_executed_heredoc_bodies() (
+  trap - ERR; set +e
+  printf '%s\n' "$1" | awk '
+    function word0(seg,  w) {
+      sub(/^[ \t]+/, "", seg)
+      while (match(seg, /^(sudo|bash|sh|source|\.)[ \t]+/)) seg = substr(seg, RLENGTH + 1)
+      split(seg, w, /[ \t]+/); sub(/^\.\//, "", w[1]); return w[1]
+    }
+    inhd { l = $0; if (dash) sub(/^[ \t]+/, "", l)
+           if (l == delim) { inhd = 0; end[nh] = ++nr } else body[nh] = body[nh] $0 "\n"; next }
+    { line[++nr] = $0
+      if (match($0, /<<-?[ \t]*[\047"]?[A-Za-z_][A-Za-z0-9_]*[\047"]?/) && (RSTART == 1 || substr($0, RSTART - 1, 1) != "<")) {
+        t = substr($0, RSTART, RLENGTH); dash = (substr(t, 1, 3) == "<<-")
+        sub(/^<<-?[ \t]*/, "", t); gsub(/[\047"]/, "", t); delim = t; inhd = 1; nh++; tg[nh] = ""
+        r = $0
+        while (match(r, />>?[ \t]*[^ \t<>;&|]+/)) { x = substr(r, RSTART, RLENGTH); sub(/^>>?[ \t]*/, "", x); sub(/^\.\//, "", x)
+          tg[nh] = tg[nh] " " x " "; r = substr(r, RSTART + RLENGTH) }
+      } }
+    END { for (h = 1; h <= nh; h++) { if (tg[h] == "" || !end[h]) continue
+            rest = ""; for (k = end[h]; k <= nr; k++) rest = rest line[k] "\n"
+            ns = split(rest, sg, /&&|\|\||[;&|()\n]/)
+            for (k = 1; k <= ns; k++) { w = word0(sg[k]); if (w != "" && index(tg[h], " " w " ")) { printf "%s", body[h]; break } } } }'
 )
 destructive_gate() {
   # Judged after stripping the heredoc body (= data). The secret check **does not strip** —
@@ -1152,6 +1183,8 @@ $(_db_creates_via_fns "$seg")
   # literally, so it **kills its own shell too** — the commands after it never run and the call ends with exit 143/144. Measured (benchmark run4~6): it repeated in every tool
   # (baseline 7 · Superpowers 10 · gstack 6 · OrangeKit 1.11.0 16 times), and the same failure more than 3 times was recorded as "stuck".
   # Judged only when certain — the pattern reads as a quoted literal and **that pattern actually matches the characters of this command**. A `[s]erver.mjs` form does not match, so it passes.
+  # pgrep counts only when its output goes to kill (`kill $(pgrep …)` · `| xargs kill` · `for p in $(pgrep …); do kill …; done`). The body of a heredoc
+  # script written and run in the same command is checked too — that body is on this shell's command line.
   # Only Linux procps pkill and pgrep kill their own shell — the BSD/macOS versions exclude their own ancestor processes by default (measured: macOS survives and
   # a procps-ng 4.0.2 container gets exit 143). It does not happen anywhere else, so it is not blocked
   local kp kflat kprocps=0
@@ -1166,7 +1199,7 @@ $(_db_creates_via_fns "$seg")
         "$(printf '%s' "$kp" | sed -E 's/^([A-Za-z0-9])/[\1]/')" >&2
       exit 2
     fi
-  done < <(_self_kill_patterns "$DCMD"); fi
+  done < <(_self_kill_patterns "$DCMD"; _self_kill_patterns "$(_executed_heredoc_bodies "$1")"); fi
 
   # ── Recoverable, but silently lost — warning only ───────────────────
   if dhas '(^|[^a-z_])rm[[:space:]]+(-[a-zA-Z]*[rR][a-zA-Z]*[[:space:]]+)*-?[a-zA-Z]*[fF]' \
