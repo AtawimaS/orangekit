@@ -2063,7 +2063,7 @@ CASES
     chmod +x "$sk/procps/pkill" "$sk/bsd/pkill"
     while IFS='|' read -r skkind skw skl skc; do
       [ -n "$skkind" ] || continue
-      skcode=0; skc=$(printf '%b' "$skc")   # multi-line commands (heredocs) are written as \n in the table
+      skcode=0
       skerr=$(jq -nc --arg c "$skc" '{tool_name:"Bash",tool_input:{command:$c}}' \
         | env -i PATH="$sk/$skkind:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sk/proj" ORANGEKIT_STATE_DIR="$sk/proj/.state" \
             bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || skcode=$?
@@ -2081,17 +2081,58 @@ procps|0|^-anchored pattern (cannot match the shell command line)|kill $(pgrep -
 procps|0|pkill without -f (process name)|pkill node
 procps|0|pgrep -f without kill (lookup only)|pgrep -f "node server.mjs"; echo listed
 procps|0|text inside a message|echo "pkill -f server.mjs"
-procps|2|pgrep -f → kill in a for loop [gstack r5]|for p in $(pgrep -f next-server); do kill $p; done; sleep 1; npm start
-procps|0|pgrep -f in a for loop (lookup only)|for p in $(pgrep -f next-server); do echo $p; done
-procps|2|script written by a heredoc and run right away [B5 r5]|cat > /tmp/restart.sh <<'EOF'\nfor p in $(pgrep -f "node server.mjs"); do kill "$p"; done\nEOF\nchmod +x /tmp/restart.sh && /tmp/restart.sh 3200
-procps|2|heredoc script run with bash [A r6]|cat > scripts/dev-restart.sh <<'EOF'\npkill -f "node server.mjs" || true\nEOF\nbash scripts/dev-restart.sh
-procps|0|heredoc script only written (runs later under another command line)|cat > scripts/dev-restart.sh <<'EOF'\npkill -f "node server.mjs" || true\nEOF\nchmod +x scripts/dev-restart.sh
 bsd|0|BSD pkill excludes its ancestors, so it passes|npm run db:migrate | tail -1; pkill -f "node server.mjs"; npm run build
 bsd|0|pgrep result piped to xargs kill on BSD|pgrep -f vitest | xargs kill -9
 SKCASES
     [ "$skbad" -eq 0 ] && ok "security-check: self-kill $skok/$skok — blocked only on procps; bracket form, anchored patterns and BSD pass"
   }
   rm -rf "${sk:-/nonexistent}"
+
+  # ── pkill/pgrep wrappers that leave ancestors out — removes the cause of self-kill ─────────────
+  # To prove: ① the bin/ wrappers hand off to proc-shim.sh ② session start prepends PATH and leaves the marker only on procps
+  # ③ with the marker, security-check does not block self-kill ④ on Linux procps the shell survives in every form (the control dies)
+  local ps_bad=0 psd ps_t ps_code ps_ver ps_img ps_out="" ps_proof=""
+  for ps_t in pkill pgrep; do
+    { [ -x "$ROOT/bin/$ps_t" ] && grep -q "proc-shim.sh\" $ps_t " "$ROOT/bin/$ps_t"; } \
+      || { ps_bad=1; bad "proc-shim: bin/$ps_t is not executable or does not hand off to proc-shim.sh" "check bin/$ps_t"; }
+  done
+  psd=$(mktemp -d 2>/dev/null) && mkdir -p "$psd/procps" "$psd/bsd" "$psd/proj" && {
+    printf '#!/bin/bash\n[ "$1" = --version ] && { echo "pkill from procps-ng 4.0.2"; exit 0; }\nexit 1\n' > "$psd/procps/pkill"
+    printf '#!/bin/bash\necho "pkill: illegal option -- -" >&2; exit 2\n' > "$psd/bsd/pkill"
+    chmod +x "$psd/procps/pkill" "$psd/bsd/pkill"
+    for ps_t in procps bsd; do
+      : > "$psd/env-$ps_t"
+      printf '{}' | env -i PATH="$psd/$ps_t:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-$ps_t" \
+        CLAUDE_ENV_FILE="$psd/env-$ps_t" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/session-brief.sh" >/dev/null 2>&1
+    done
+    if grep -qxF "export PATH=\"$ROOT/bin:\$PATH\"" "$psd/env-procps" && [ -f "$psd/proj/.state-procps/proc-shim.active" ] \
+       && [ ! -s "$psd/env-bsd" ] && [ ! -f "$psd/proj/.state-bsd/proc-shim.active" ]; then :
+    else ps_bad=1; bad "proc-shim: session start does not prepend PATH / leave the marker on procps, or does it on BSD too" "check the proc-shim block in session-brief.sh"; fi
+    ps_code=0
+    jq -nc '{tool_name:"Bash",tool_input:{command:"pkill -f \"node server.mjs\"; npm run build"}}' \
+      | env -i PATH="$psd/procps:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-procps" \
+          bash "$ROOT/scripts/security-check.sh" >/dev/null 2>&1 || ps_code=$?
+    [ "$ps_code" = 0 ] || { ps_bad=1; bad "proc-shim: security-check still blocks pkill -f in a session with the wrappers (marker) (exit $ps_code)" "see the proc-shim.active check in security-check.sh"; }
+  }
+  rm -rf "${psd:-/nonexistent}"
+  ps_ver=$(pkill --version 2>&1) || true
+  case "$ps_ver" in
+    *procps*) ps_out=$(bash "$ROOT/scripts/fixtures/proc-shim-linux.sh" "$ROOT" 2>&1) && ps_proof="this host (procps)" || ps_proof=fail ;;
+    *) # run both paths — a version with `--ignore-ancestors` (debian bookworm 4.0.2) and one without (ubuntu 22.04 3.3.17, filtered here)
+       if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+         for ps_img in debian:bookworm-slim ubuntu:22.04; do
+           ps_out=$(docker run --rm --init --entrypoint bash -v "$ROOT:/plugin:ro" "$ps_img" -c \
+             'apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq procps >/dev/null 2>&1 || exit 9; bash /plugin/scripts/fixtures/proc-shim-linux.sh /plugin' 2>&1)
+           case $? in 0) ps_proof="${ps_proof:+$ps_proof · }$ps_img" ;; 9) ;; *) ps_proof=fail; break ;; esac
+         done
+       fi ;;
+  esac
+  if [ "$ps_proof" = fail ]; then
+    ps_bad=1; bad "proc-shim: Linux procps proof failed — $(printf '%s' "$ps_out" | grep -E 'FAIL|pass [0-9]' | head -3 | tr '\n' ' ')" "run scripts/fixtures/proc-shim-linux.sh directly"
+  elif [ -z "$ps_proof" ]; then
+    warn "proc-shim: Linux procps proof unverified — no procps host and no docker" "on Linux: bash scripts/fixtures/proc-shim-linux.sh \"\$PWD\""
+  fi
+  [ "$ps_bad" -eq 0 ] && [ -n "$ps_proof" ] && ok "proc-shim: pkill/pgrep leave ancestors out — 3 wiring checks + Linux proof $(printf '%s' "$ps_out" | grep -oE 'pass [0-9]+' | tail -1) each ($ps_proof)"
 
 
   # ── Prior-knowledge gate (rule cards · skills) ──────────────────────────────

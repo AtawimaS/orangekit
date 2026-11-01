@@ -120,6 +120,20 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   rm -f "$(orangekit_state_dir)/ui-notice.stamp" 2>/dev/null || true
 fi
 
+# Linux procps pkill/pgrep do not leave their own ancestor shells out, so `pkill -f PAT` also kills the shell running the command.
+# Put the bin/ wrappers (which leave ancestors out) at the **front** of this session's Bash PATH — the plugin bin/ is appended at
+# the end of PATH and hidden by the originals (measured), so prepend it through CLAUDE_ENV_FILE. Not procps (macOS · BSD) → leave it alone.
+# With the marker present, security-check stops guessing self-kill from the command text — the cause is gone
+mkdir -p "$(orangekit_state_dir)" 2>/dev/null || true
+rm -f "$(orangekit_state_dir)/proc-shim.active" 2>/dev/null || true
+PK_VER=$(pkill --version 2>&1 || true)   # macOS/BSD exit 2 on --version — caught inside so the ERR trap is not touched
+case "$PK_VER" in *procps*)
+  if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x "$PLUGIN_ROOT/bin/pkill" ] && [ -x "$PLUGIN_ROOT/bin/pgrep" ]; then
+    printf 'export PATH="%s/bin:$PATH"\n' "$PLUGIN_ROOT" >> "$CLAUDE_ENV_FILE" 2>/dev/null \
+      && : > "$(orangekit_state_dir)/proc-shim.active"
+  fi ;;
+esac
+
 # Open workspaces
 if [ -d "$ORANGEKIT_ROOT/dev/active" ]; then
   OPEN=$({ find "$ORANGEKIT_ROOT/dev/active" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true; } | head -5)

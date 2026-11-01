@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wraps Linux procps pgrep so it leaves its own ancestor shells out of the results — why and how: header of scripts/lib/proc-shim.sh.
+# session-brief.sh puts this bin/ at the front of the Bash tool's PATH (the plugin bin/ itself is appended at the end, behind the original).
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec bash "$here/../scripts/lib/proc-shim.sh" pgrep "$here" "$@"
