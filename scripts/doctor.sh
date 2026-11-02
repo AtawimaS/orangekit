@@ -2090,8 +2090,9 @@ SKCASES
 
   # ── pkill/pgrep wrappers that leave ancestors out — removes the cause of self-kill ─────────────
   # To prove: ① the bin/ wrappers hand off to proc-shim.sh ② session start prepends PATH and leaves the marker only on procps
-  # ③ with the marker, security-check does not block self-kill ④ on Linux procps the shell survives in every form (the control dies)
-  local ps_bad=0 psd ps_t ps_code ps_ver ps_img ps_out="" ps_proof=""
+  # ③ security-check stops blocking self-kill only with this session's marker and its wrappers present — another session's marker or
+  # vanished wrappers do not switch it off ④ on Linux procps the shell survives in every form (the control dies)
+  local ps_bad=0 psd ps_t ps_code ps_ver ps_img ps_out="" ps_proof="" ps_case ps_sid ps_want ps_err
   for ps_t in pkill pgrep; do
     { [ -x "$ROOT/bin/$ps_t" ] && grep -q "proc-shim.sh\" $ps_t " "$ROOT/bin/$ps_t"; } \
       || { ps_bad=1; bad "proc-shim: bin/$ps_t is not executable or does not hand off to proc-shim.sh" "check bin/$ps_t"; }
@@ -2102,17 +2103,24 @@ SKCASES
     chmod +x "$psd/procps/pkill" "$psd/bsd/pkill"
     for ps_t in procps bsd; do
       : > "$psd/env-$ps_t"
-      printf '{}' | env -i PATH="$psd/$ps_t:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-$ps_t" \
+      printf '{"session_id":"s-a"}' | env -i PATH="$psd/$ps_t:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-$ps_t" \
         CLAUDE_ENV_FILE="$psd/env-$ps_t" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/session-brief.sh" >/dev/null 2>&1
     done
-    if grep -qxF "export PATH=\"$ROOT/bin:\$PATH\"" "$psd/env-procps" && [ -f "$psd/proj/.state-procps/proc-shim.active" ] \
-       && [ ! -s "$psd/env-bsd" ] && [ ! -f "$psd/proj/.state-bsd/proc-shim.active" ]; then :
-    else ps_bad=1; bad "proc-shim: session start does not prepend PATH / leave the marker on procps, or does it on BSD too" "check the proc-shim block in session-brief.sh"; fi
-    ps_code=0
-    jq -nc '{tool_name:"Bash",tool_input:{command:"pkill -f \"node server.mjs\"; npm run build"}}' \
-      | env -i PATH="$psd/procps:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-procps" \
-          bash "$ROOT/scripts/security-check.sh" >/dev/null 2>&1 || ps_code=$?
-    [ "$ps_code" = 0 ] || { ps_bad=1; bad "proc-shim: security-check still blocks pkill -f in a session with the wrappers (marker) (exit $ps_code)" "see the proc-shim.active check in security-check.sh"; }
+    if grep -qxF "export PATH=\"$ROOT/bin:\$PATH\"" "$psd/env-procps" && [ "$(cat "$psd/proj/.state-procps/proc-shim/s-a" 2>/dev/null)" = "$ROOT/bin" ] \
+       && [ ! -s "$psd/env-bsd" ] && [ ! -f "$psd/proj/.state-bsd/proc-shim/s-a" ]; then :
+    else ps_bad=1; bad "proc-shim: session start does not prepend PATH / leave the session marker on procps, or does it on BSD too" "check the proc-shim block in session-brief.sh"; fi
+    # A marker pointing at vanished wrappers — the old cache deleted by a plugin update mid-session
+    printf '%s\n' "$psd/gone/bin" > "$psd/proj/.state-procps/proc-shim/s-old"
+    for ps_case in "s-a 0 still blocks although this session's marker and wrappers exist" "s-b 2 another session's marker switches the check off (parallel sessions)" "s-old 2 a marker pointing at vanished wrappers switches the check off (plugin update)"; do
+      ps_sid=${ps_case%% *}; ps_want=${ps_case#* }; ps_want=${ps_want%% *}; ps_code=0
+      ps_err=$(jq -nc --arg s "$ps_sid" '{session_id:$s,tool_name:"Bash",tool_input:{command:"pkill -f \"node server.mjs\"; npm run build"}}' \
+        | env -i PATH="$psd/procps:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-procps" \
+            bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || ps_code=$?
+      # When it blocks, it must block for the intended reason
+      if [ "$ps_code" != "$ps_want" ] || { [ "$ps_want" = 2 ] && ! grep -q 'kills its own shell' <<<"$ps_err"; }; then
+        ps_bad=1; bad "proc-shim: ${ps_case#* * } (exit $ps_code)" "see the proc-shim marker check in security-check.sh"
+      fi
+    done
   }
   rm -rf "${psd:-/nonexistent}"
   ps_ver=$(pkill --version 2>&1) || true
@@ -2132,7 +2140,7 @@ SKCASES
   elif [ -z "$ps_proof" ]; then
     warn "proc-shim: Linux procps proof unverified — no procps host and no docker" "on Linux: bash scripts/fixtures/proc-shim-linux.sh \"\$PWD\""
   fi
-  [ "$ps_bad" -eq 0 ] && [ -n "$ps_proof" ] && ok "proc-shim: pkill/pgrep leave ancestors out — 3 wiring checks + Linux proof $(printf '%s' "$ps_out" | grep -oE 'pass [0-9]+' | tail -1) each ($ps_proof)"
+  [ "$ps_bad" -eq 0 ] && [ -n "$ps_proof" ] && ok "proc-shim: pkill/pgrep leave ancestors out — 5 wiring checks (session marker · other session · vanished wrappers included) + Linux proof $(printf '%s' "$ps_out" | grep -oE 'pass [0-9]+' | tail -1) each ($ps_proof)"
 
 
   # ── Prior-knowledge gate (rule cards · skills) ──────────────────────────────

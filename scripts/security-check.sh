@@ -1154,11 +1154,14 @@ $(_db_creates_via_fns "$seg")
   # Judged only when certain — the pattern reads as a quoted literal and **that pattern actually matches the characters of this command**. A `[s]erver.mjs` form does not match, so it passes.
   # Only Linux procps pkill and pgrep kill their own shell — the BSD/macOS versions exclude their own ancestor processes by default (measured: macOS survives and
   # a procps-ng 4.0.2 container gets exit 143). It does not happen anywhere else, so it is not blocked
-  local kp kflat kprocps=0
+  local kp kflat kprocps=0 ksid kbin=""
   { pkill --version 2>&1 || true; } | grep -q procps && kprocps=1
-  # If session start put the ancestor-excluding wrappers at the front of PATH (marker), the shell does not die — do not guess and block.
-  # Only where the wrappers could not be installed (no CLAUDE_ENV_FILE, etc.) does the text check below remain
-  [ -f "$(orangekit_state_dir)/proc-shim.active" ] && kprocps=0
+  # If session start put the ancestor-excluding wrappers at the front of **this session's** PATH (per-session marker) and those wrappers
+  # still exist, the shell does not die — do not guess and block. Other sessions' markers are not read (parallel sessions), and a marker
+  # whose wrappers are gone (plugin update mid-session) falls back to the text check
+  ksid=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
+  [ -n "$ksid" ] && kbin=$(head -1 "$(orangekit_state_dir)/proc-shim/$ksid" 2>/dev/null || true)
+  [ -n "$kbin" ] && [ -x "$kbin/pkill" ] && [ -x "$kbin/pgrep" ] && kprocps=0
   kflat=$(printf '%s' "$1" | tr '\n' ' ')   # A shell command line is one string — aligned with grep's line-by-line judgement
   if [ "$kprocps" = 1 ]; then while IFS= read -r kp; do
     [ -n "$kp" ] || continue

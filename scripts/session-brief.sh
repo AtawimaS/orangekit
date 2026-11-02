@@ -123,14 +123,20 @@ fi
 # Linux procps pkill/pgrep do not leave their own ancestor shells out, so `pkill -f PAT` also kills the shell running the command.
 # Put the bin/ wrappers (which leave ancestors out) at the **front** of this session's Bash PATH — the plugin bin/ is appended at
 # the end of PATH and hidden by the originals (measured), so prepend it through CLAUDE_ENV_FILE. Not procps (macOS · BSD) → leave it alone.
-# With the marker present, security-check stops guessing self-kill from the command text — the cause is gone
-mkdir -p "$(orangekit_state_dir)" 2>/dev/null || true
-rm -f "$(orangekit_state_dir)/proc-shim.active" 2>/dev/null || true
+# With the marker present, security-check stops guessing self-kill from the command text — the cause is gone.
+# The marker is **per session** and holds the wrapper directory: one marker per project would let a parallel session that could not
+# install the wrappers switch the check off too, and a plugin update mid-session that deletes the old cache (the wrappers) would leave
+# only the marker behind — security-check re-checks the wrappers in that directory
+PS_SID=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
+PS_DIR="$(orangekit_state_dir)/proc-shim"
+mkdir -p "$PS_DIR" 2>/dev/null || true
+find "$PS_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+[ -n "$PS_SID" ] && rm -f "$PS_DIR/$PS_SID" 2>/dev/null || true
 PK_VER=$(pkill --version 2>&1 || true)   # macOS/BSD exit 2 on --version — caught inside so the ERR trap is not touched
 case "$PK_VER" in *procps*)
-  if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x "$PLUGIN_ROOT/bin/pkill" ] && [ -x "$PLUGIN_ROOT/bin/pgrep" ]; then
+  if [ -n "$PS_SID" ] && [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x "$PLUGIN_ROOT/bin/pkill" ] && [ -x "$PLUGIN_ROOT/bin/pgrep" ]; then
     printf 'export PATH="%s/bin:$PATH"\n' "$PLUGIN_ROOT" >> "$CLAUDE_ENV_FILE" 2>/dev/null \
-      && : > "$(orangekit_state_dir)/proc-shim.active"
+      && printf '%s\n' "$PLUGIN_ROOT/bin" > "$PS_DIR/$PS_SID"
   fi ;;
 esac
 
