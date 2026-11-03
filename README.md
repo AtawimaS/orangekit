@@ -2,7 +2,7 @@
 
 AI Native Dev Harness for Claude Code — reversibility-axis workflow, self-testing hooks, graph instrumentation.
 
-![version](https://img.shields.io/badge/version-1.12.0-blue)
+![version](https://img.shields.io/badge/version-1.13.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 ## What it is
@@ -167,7 +167,7 @@ The canonical source for invocation conditions is the Phase table in `.claude/ru
 
 | What invokes it | Skill |
 | --- | --- |
-| **Phase table** (P0~P6) | `brainstorming` · `research` · `business-planner` · `service-planner` · `council-review` · `prompt-enhancer` · `prd-generator` · `dev-docs-generator` · `test-driven-development` · `completion-review` · `codex-claude-loop` |
+| **Phase table** (P0~P6) | `brainstorming` · `research` · `business-planner` · `service-planner` · `council-review` · `prompt-enhancer` · `prd-generator` · `dev-docs-generator` · `test-driven-development` · `completion-review` · `codex-cross-check` |
 | **Doc dependency** (when `dev/docs/prd/` is edited) | `prd-reviewer` |
 | **description** (the model fires it when the condition holds) | `receiving-code-review` · `security-review` · `shortcut-ledger` · `pr-prep` · `codebase-survey` · `ui-ux-design` · `image-generator` · `skill-enhancer` |
 | **Another skill or hook** | `stack-guide-generator` (← `orangekit-init` · session briefing) |
