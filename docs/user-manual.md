@@ -202,7 +202,7 @@ before adopting it, and rebuts wrong findings with grounds.
 
 ## 5. Skill catalogue — an index by situation
 
-**26 skills — no need to memorize them.** Claude invokes what fits the situation. This table is for "when you want to invoke one yourself".
+**27 skills — no need to memorize them.** Claude invokes what fits the situation. This table is for "when you want to invoke one yourself".
 
 ### Planning and design
 
@@ -222,6 +222,7 @@ before adopting it, and rebuts wrong findings with grounds.
 | Situation | Skill |
 | --- | --- |
 | building a design system or screens | `/ui-ux-design` |
+| I want a finished Figma design turned into assets for development | `/figma-asset-extractor` — tokens, components, screens, flows, images and icons into `dev/docs/design/figma/` |
 | I need an image, icon or mockup | `/image-generator` — with an API key it generates (**billed separately from a subscription**); without one it gives you a prompt to paste into ChatGPT. Diagrams are `diagram-design` |
 | changing behaviour where there is a test runner | `/test-driven-development` |
 | fixing a bug | `/fix-issue` |

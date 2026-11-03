@@ -11,7 +11,7 @@ the failure a device just looks complicated; with the failure, most of them are 
 > This document is not a copy but a **reading surface**, and where the values diverge the canonical source is right.
 > Copies are a source of drift — that is this repository's consistent position, and this document is no exception.
 
-**Cross-check against reality** — hooks 5 · T1 rule cards 9 · skills 26 · graph nodes 49 · edges 90
+**Cross-check against reality** — hooks 5 · T1 rule cards 9 · skills 27 · graph nodes 50 · edges 93
 (`doctor --fast` cross-checks this line against reality. Numbers written by hand are certain to go stale.)
 
 | Section | What it covers |
@@ -485,7 +485,7 @@ automatic run silently overwriting a user-modified copy never happens, and an up
 
 ### Why T2 is on-demand
 
-Make the bodies of 26 skills resident and there is no context left. What is resident is only each skill's
+Make the bodies of 27 skills resident and there is no context left. What is resident is only each skill's
 `description`, and even that has its budget measured in characters by `doctor --usage`.
 **Norms have to be resident and procedures can arrive when invoked** — that division is the boundary between T1 and T2.
 
@@ -739,7 +739,7 @@ Not taking the person out of the self-improvement loop is deliberate design.
 
 ## 04 — Graph engineering — what a checklist cannot answer
 
-**Canonical**: `workflow.graph.json` (49 nodes · 90 edges) · `dev/docs/port-to-origin/phase-5-graph.md`
+**Canonical**: `workflow.graph.json` (50 nodes · 93 edges) · `dev/docs/port-to-origin/phase-5-graph.md`
 
 ### Why a graph
 
@@ -765,7 +765,7 @@ A **node** is an asset that executes or holds state. There are 7 `kind`s:
 
 | kind | Count | What |
 | --- | --- | --- |
-| `skill` | 28 | 26 skills + `harness-evaluation` (the `orangekit-harness` plugin) + `install-guide` (a node standing up the assembly-only path separately) |
+| `skill` | 29 | 27 skills + `harness-evaluation` (the `orangekit-harness` plugin) + `install-guide` (a node standing up the assembly-only path separately) |
 | `stage` | 6 | `understand` · `plan` · `build` · `verify` · `cross-check` · `rule-promotion` — **the model's behaviour**, so code cannot emit them |
 | `hook` | 5 | the only category that code executes |
 | `agent` | 2 | `orangekit-planner` · `orangekit-reviewer` |
@@ -882,7 +882,7 @@ loop.** A finding has to go back to the main session, and that is the `orangekit
 An agent does not inherit `.claude/rules/`, so the norms it needs are written **directly into the agent prompt**.
 But so that the same norm is not asserted in two places, one side is left as a quotation.
 
-### 26 skills — divided by how they fire
+### 27 skills — divided by how they fire
 
 | How it fires | Examples | Character |
 | --- | --- | --- |

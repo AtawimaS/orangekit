@@ -441,6 +441,13 @@
       "produces": "design system (dev/docs/design/<project>/MASTER.md)"
     },
     {
+      "id": "figma-asset-extractor",
+      "kind": "skill",
+      "path": "skills/figma-asset-extractor/SKILL.md",
+      "when": "Fires by description when asked to extract or turn into assets a Figma file given by URL. Implementing one node right away is figma-design-to-code; setting direction with no design is ui-ux-design",
+      "produces": "design bundle (dev/docs/design/figma/<slug>/ — README · tokens.json · components/ · screens/ · flows/ · manifest.json · assets/)"
+    },
+    {
       "id": "image-generator",
       "kind": "skill",
       "path": "skills/image-generator/SKILL.md",
@@ -924,6 +931,21 @@
       "from": "receiving-code-review",
       "to": "health-check",
       "cond": "Sonar re-analysis after the fix — termination predicate: 0 new issues OR the single re-analysis is used up"
+    },
+    {
+      "from": "plan",
+      "to": "figma-asset-extractor",
+      "cond": "A Figma design file is given before implementation and no bundle exists or the source is newer"
+    },
+    {
+      "from": "figma-asset-extractor",
+      "to": "design-system",
+      "cond": "Store the bundle that passed check — dev/docs/design/figma/<slug>/"
+    },
+    {
+      "from": "figma-asset-extractor",
+      "to": "build",
+      "cond": "Read the bundle README first and use its tokens, component and screen specs as the primary source for implementation"
     }
   ]
 }

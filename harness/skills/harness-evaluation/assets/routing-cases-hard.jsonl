@@ -116,3 +116,6 @@
 {"id":"h-neg-13","query":"What's the difference between interface and type in TS?","expect":["none"],"kind":"neg"}
 {"id":"h-neg-14","query":"Change the login page title text from 'Log in' to 'Get started'.","expect":["none"],"kind":"neg"}
 {"id":"h-neg-15","query":"It says port 3000 is already in use locally. How do I free it?","expect":["none"],"kind":"neg"}
+{"id":"h-figma-asset-extractor-1","query":"Our designer finished every screen in Figma. Before we start building, pull everything out of this file — components, colors, fonts, images — and organize it. https://www.figma.com/design/AbCdEfGhIjKlMnOpQrStUv/app","expect":["figma-asset-extractor"],"kind":"pos"}
+{"id":"h-figma-asset-extractor-2","query":"The plan and design are final in Figma. Turn them into assets in the project so the AI can build exactly that.","expect":["figma-asset-extractor"],"kind":"pos"}
+{"id":"h-figma-asset-extractor-near-1","query":"We have no design at all yet. Start by picking a color and font pairing that suits a healthcare app.","expect":["ui-ux-design"],"kind":"near"}
