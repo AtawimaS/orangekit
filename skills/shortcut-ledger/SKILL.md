@@ -1,6 +1,6 @@
 ---
 name: shortcut-ledger
-description: Harvests the deliberate shortcut markers (`ORANGEKIT-SHORTCUT:`) left in the code, re-assesses whether each ceiling still holds, and decides what to reclaim. Use for a debt check before a release, or after scale or load has grown. Shrinking code that is already written is the built-in `/simplify`.
+description: Collects the shortcut markers (`ORANGEKIT-SHORTCUT:`) deliberately left in the code, re-assesses whether each ceiling (the scale or load limit) still holds, and decides which items to pay back now. Use for a technical-debt check before a release, or when growing traffic or data makes you worry about hardcoding and stopgaps that were skipped on purpose. For tidying code you just wrote use /simplify.
 ---
 
 # Shortcut Ledger

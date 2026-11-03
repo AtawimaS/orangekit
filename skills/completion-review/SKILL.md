@@ -1,11 +1,21 @@
 ---
 name: completion-review
-description: Use when code implementation is finished and the documentation needs to catch up. Updates context.md, checks off tasks.md, refreshes the related architecture/API docs, and archives the completed work. It closes out Reversible changes; Costly and above belong to orangekit-reviewer.
+description: Wraps up the documentation for finished work — updates and checks off context and tasks in dev/active, refreshes the related architecture and API docs, and archives the completed work. Use right after a feature is implemented, or when the user says "I'm done, tidy up the docs". For a PR body to hand to reviewers use /pr-prep; review of shared-contract, API, or migration changes belongs to orangekit-reviewer.
 ---
 
 # Completion Review
 
 A skill that brings documentation up to date and archives the work once development is done.
+
+Copy this checklist into your response to show progress:
+
+```
+- [ ] Step 1 Decide work type and scope
+- [ ] Step 2 Dev docs, Step 3 Project docs
+- [ ] Step 4.5 Self-check (do not archive if it fails)
+- [ ] Step 4 Archive
+- [ ] Step 5 Completion report
+```
 
 ## Workflow
 
@@ -63,6 +73,4 @@ this skill does not decide whether the implementation or the PRD is right.
 
 ## Pitfalls
 
-- Do not auto-fix an implementation that differs from the PRD — always report it and let the user choose
-- Before archiving, confirm whether unchecked items in tasks.md are deliberate exclusions or oversights
-- When updating SESSION PROGRESS in context.md, do not overwrite earlier session records — append
+The Step 4.5 checks are the pitfall list. Add just one: an implementation that differs from the PRD is not fixed automatically, because only the user can decide which side is right.

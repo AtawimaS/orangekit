@@ -1,6 +1,6 @@
 ---
 name: dev-docs-generator
-description: Use right after the PRD is finished, when the pre-implementation dev docs (plan, context, tasks) are needed. Creates the plan, context, and tasks documents in the dev/active/ folder. For new feature work, extending an existing feature, and refactoring. This is Phase 3 of the CLAUDE.md workflow.
+description: Creates the dev doc set (plan, context, tasks) in dev/active/ just before implementation, breaking the work into phases and a checklist. Use right after the PRD is settled, before starting a feature, extension, or refactoring that will span several sessions, or when asked for "an implementation plan" or to "break the work down". For tidying docs after implementation is done, use /completion-review.
 ---
 
 # Dev Docs Generator
@@ -16,6 +16,15 @@ A skill that creates the dev docs (plan, context, tasks) in the `dev/active/` fo
 | A PRD already exists                                     | The `dev/docs/prd/` path      | Find the existing PRD automatically and use it  |
 
 ## Workflow
+
+Copy this checklist into your response to show progress.
+
+```
+- [ ] 1 Decide whether it is needed and the document scope
+- [ ] 2 Check existing dev/active and archive
+- [ ] 3 Contract (if both sides), create the three docs, Read first per slice
+- [ ] 4 User confirmation + artifact verification
+```
 
 ### Step 1: Identify the work type and decide the document scope
 
@@ -51,7 +60,7 @@ pull steps 1 and 2 of "the inner order of a single feature" in `workflow-routing
   (a `paths:` card comes up only when read). The moment you write to that path, the `data-modeling` card is summoned.
 
 Create them in `dev/active/<slug>/` using the three forms in `assets/doc-templates.md`.
-The **Scope** section of tasks.md is mandatory — orangekit-reviewer checks compliance with Scope.
+`assets/doc-templates.md` is a strict format. The **Scope** section of tasks.md is mandatory — orangekit-reviewer checks compliance with Scope.
 
 For each slice, fill in **Read first** — pass the file paths that slice will create or edit to
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/security-check.sh" --owning <path…>` and the rule cards and skills that own them come out, using the
@@ -73,6 +82,8 @@ Present the list of generated documents plus the approach summary from the plan,
 
 ## Artifact verification
 
+After generating, check the items below, fix any that fail, and check once more. If they still fail, report to the user — this is a structural check, so repeating the same fix gives the same result, and a remaining failure is a problem with the template or the input.
+
 - Do the three documents have the template's required sections?
 - Does tasks.md have a Scope section?
 - Does each slice state `Blocked by`, and does one slice fit into a single fresh context?
@@ -82,6 +93,6 @@ Present the list of generated documents plus the approach summary from the plan,
 
 ## Reference documents
 
-- Document templates: [assets/doc-templates.md](assets/doc-templates.md)
+- Document templates: [assets/doc-templates.md](assets/doc-templates.md) — read it in Step 3
 - Contract form: `${CLAUDE_PLUGIN_ROOT}/skills/stack-guide-generator/assets/wire-contract.template.md` — do not keep a copy
 - Existing active work: `dev/active/` · archive: `dev/archive/`

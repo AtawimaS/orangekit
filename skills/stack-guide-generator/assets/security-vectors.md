@@ -2,6 +2,15 @@
 
 **Do not carry a security primitive over from another pack. Write it fresh, and test it by running these vectors.**
 
+## Contents
+
+- Usage rules
+- A. Return path · redirect validation
+- B. Path normalization · file access
+- C. Token · secret comparison
+- D. Escaping · rendering
+- E. Authorization decisions
+
 Measured (2026-08-23): one return-path validation function was copied from the react-vite pack → the vue pack, and
 the same defect was in **all four shipped copies**. All four blocked the direct forms `//host` · `/\host` ·
 `javascript:`, and **only the dot-segment form got through.** Three original audits

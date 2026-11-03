@@ -1,17 +1,35 @@
 ---
 name: skill-enhancer
-description: Hardens a skill to harness grade — first rules on keep · boundary split · switch to manual · merge · delete, then injects boundary declarations, behavioral contracts, failure paths, machine checks and wiring into the kept ones only. Use right after creating or improving a skill with skill-creator, when hardening an existing skill, or when an eval detects a defect. For creation and the A/B eval loop, use skill-creator.
+description: Audits an existing skill, or one just created, against the official authoring best practices and harness standards — first rules on keep · split · merge · delete, then reinforces the kept skill's description triggers, progressive disclosure, failure paths, machine checks, and boundaries with neighbors. Use when the user says "improve the skill", "harden the skill", "audit the skill", "make it follow best practices", or right after creating a skill with skill-creator. For creating new skills and for the eval benchmark and description-optimization loop, use skill-creator.
 ---
 
 # Skill Enhancer
 
-Promotes a skill from an **isolated artifact** to **a node in the graph**.
-`references/superiority-patterns.md` is the original for the definitions, evidence and injection
-methods of the 6 patterns and for the overlap ruling procedure — read it before the Step 0 ruling.
+Builds a skill on the **floor of the official best practices**, then promotes it to **a node in the graph**.
 
-> **Boundary**: creation, test prompts and A/B benchmarks are skill-creator's territory.
-> This skill covers only the dimensions that eval loop cannot score — behavior on failure,
-> the division of labor with neighboring tools, token discipline. They do not overlap; they connect.
+| What | Where the original is | When to read it |
+| --- | --- | --- |
+| Official best-practice baseline B1–B9 (description, conciseness, freedom, progressive disclosure, workflow, evaluation) | `references/authoring-baseline.md` | Always, before Step 1 |
+| Harness superiority patterns P1–P6 · overlap ruling · applicability matrix | `references/superiority-patterns.md` | The Step 0 overlap ruling, Step 2 |
+| Machine ruling (name, description, line count, contents list, reference depth, paths) | `scripts/skill-lint.sh` — **run it** | Step 1, Step 4 |
+
+> **Boundary**: creating new skills, test prompts, A/B benchmarks and the description-optimization loop are
+> skill-creator's territory. This skill covers only the dimensions that eval loop cannot score — adherence to the
+> best practices, behavior on failure, the division of labor with neighboring tools, token discipline. They do not overlap; they connect.
+
+**Decision point** — is this a skill that was just made (right after skill-creator, or hand-written)? → Step 0 asks
+**Q1 (overlap) only**, then go to Step 1. An existing skill? → the whole of Step 0.
+
+Progress checklist — copy it into your reply and tick it off as you go:
+
+```
+- [ ] Step 0 Keep ruling (if not keep, report and stop)
+- [ ] Step 1 skill-lint zero failures + subtraction
+- [ ] Step 2 Baseline B1–B9 + P pattern diagnosis
+- [ ] Step 3 Apply only what falls short
+- [ ] Step 4 Self-test (revert on failure)
+- [ ] Step 5 Report + description handoff
+```
 
 ## Step 0: The keep ruling — it comes before hardening
 
@@ -69,7 +87,17 @@ sentence and thereby eliminating it is part of the same move — the procedure i
 
 ## Step 1: Subtraction — machine ruling first
 
-Subtract before you harden. All four below are **ruled by machine** — left to the model's judgement,
+First run the machine ruling for the official best practices. **If there is even one failure (✗), fix it first** —
+name reserved words, the 1024-character description and the 500-line body are platform constraints, so they come before hardening:
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/scripts/skill-lint.sh" <target>
+```
+
+A warning (!) is a judgement item — add the contents list, and either link two-level references directly from SKILL.md or merge them.
+If a name reserved-word violation is on **an already-shipped skill**, a rename is Costly: report the ruling and its basis and let the user choose.
+
+Then subtract before you harden. All four below are **ruled by machine** — left to the model's judgement,
 16 empty sections survived in the repository:
 
 ```bash
@@ -86,9 +114,14 @@ bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/doctor.sh" --fast 2>&1 | grep -E 'orphan 
 Imperative vocabulary is **not deleted by default** — attach a reason, or, when that reason is already
 in the T0 norms or a hook, it is a duplicate and comes out. If there is anything to subtract, show the list, confirm, then remove.
 
-## Step 2: 6-pattern diagnosis — machine ruling first
+## Step 2: Baseline → 6-pattern diagnosis
 
-After reading the catalog, start with what a machine can rule on (`<target>` = the skill directory):
+**Baseline first.** Hold the target against B1–B9 in `references/authoring-baseline.md` and list what falls short.
+The heaviest is B1 — check whether the description's trigger vocabulary is **what users actually type**,
+whether it covers indirect phrasing ("I'm not sure this will make money"), and whether the boundary with competing built-ins and neighbors is on both sides.
+Then B3 (cut what Claude already knows), B4 (freedom per step) and B6 (checklists and verification loops), in that order.
+
+On top of that, look at the 6 patterns. After reading the catalog, start with what a machine can rule on (`<target>` = the skill directory):
 
 ```bash
 # P3 — no iteration ceiling (a mention of iteration or retry with no ceiling falls short)
@@ -107,7 +140,8 @@ to settle the skill's type, and look deeply only at whether the patterns "requir
 
 ## Step 3: Apply the hardening — only what applies
 
-Apply only the patterns the diagnosis ruled as falling short, following the catalog's "injection method".
+Apply only the baseline items and patterns the diagnosis ruled as falling short. For the baseline, follow the
+judgement criteria in `authoring-baseline.md`; for the patterns, the catalog's "injection method".
 
 - Each injection follows **the target skill's vocabulary and style** (hardening must not look grafted on)
 - P3's ceiling numbers and P2's prohibition wording are **derived from the nature of that skill's work** —
@@ -118,8 +152,9 @@ Apply only the patterns the diagnosis ruled as falling short, following the cata
 
 - [ ] After hardening, does every promise in the description still exist in the body
 - [ ] Does each newly added iteration ceiling, demotion rule and prohibition carry a reason
-- [ ] Are all four Step 1 commands at zero hits (has what was subtracted not come back)
-- [ ] Line count: SKILL.md ≤ 300 lines after hardening (over that, split into resources or redo the subtraction)
+- [ ] Does `bash "${CLAUDE_SKILL_DIR}/scripts/skill-lint.sh" <target>` exit 0, and are all four Step 1 commands at zero hits (has what was subtracted not come back)
+- [ ] Line count: SKILL.md ≤ 300 lines after hardening (the official limit is 500; over that, split into resources or redo the subtraction)
+- [ ] Is the description in B1 form (what + when + the boundary where needed), with no internal terms occupying the trigger slots
 - [ ] **Description byte attribution**: if there is a net increase, is that increase explained by a
       P1 boundary or a P5 invocation contract. An unexplained net increase is reverted — P1 and P5
       structurally lengthen the description, and that cost is charged unconditionally every session

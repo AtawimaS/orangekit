@@ -1,6 +1,6 @@
 ---
 name: stack-guide-generator
-description: Writes a stack rule file (.claude/rules/stack-*.md) for a stack with no pack (Rust · Flutter · SvelteKit and the like), backed by the official docs (default), and on request generates detailed guide skills (frontend/backend/app-guide) into the project's skills directory. Use when orangekit-init calls it after the stack has been chosen, or when the user asks for "stack rules", to "generate guides", for a "stack guide", or to "change the tech stack".
+description: Writes a stack rule file (.claude/rules/stack-*.md) for a stack with no guide pack (Rust · Go · Flutter · SvelteKit and the like), backed by the official docs, and on request generates detailed guide skills (frontend/backend/app-guide) into the project. Use when a tech stack was newly adopted or changed and no rules or guides exist for it, when the user says "stack rules", "stack guide", or "generate guides", and when /orangekit-init calls it after the stack has been chosen. To refresh the structure and convention cards of existing code use /codebase-survey.
 ---
 
 # Stack Guide Generator
@@ -24,6 +24,36 @@ A guide skill's structure follows the `assets/guide-skeleton.md` generation spec
 Rule generation writes **only items backed by evidence from outside the model (official doc URL · check date · installed version)**, and creates no file if it cannot back even one.
 The evidence is a measurement: the detailed guide did not raise scores and a small rule file scored the same (guide A/B, 2026-10),
 and the universal rules (L1) alone blocked the known pitfalls (T-D "L1 only", 3 runs at 23/23, 2026-10-25). Full mode stays because pack authoring (Step 2-A) uses those assets.
+
+In full mode, copy the checklist below into your reply and tick it off as you go.
+
+```
+- [ ] 0 Read guide-job and set status=running
+- [ ] 1 Fix the dimensions
+- [ ] 2 Look up axis packs, branch
+- [ ] 3 Contract file → delegated generation
+- [ ] 4 Gate · execution verification (FAIL 0)
+- [ ] 5 One audit
+- [ ] 6 Repair → rerun the gate
+- [ ] 7 Stamp, report, close the job
+```
+
+## Bundled files — what to read, and when
+
+Every one is reachable one level from this file. Run the shell scripts in `scripts/` — **do not read them** (`--help` lists the checks).
+
+| File | When |
+| --- | --- |
+| `assets/rules-authoring.md` | The whole rules mode |
+| `assets/guide-skeleton.md` | The full-mode generation spec — hand it to the generating subagent |
+| `assets/wire-contract.template.md` | Step 3-0, writing the contract file |
+| `assets/generation-delegation.md` | Step 3-1, delegating generation |
+| `assets/verification-gate.md` | Step 4, gate and execution verification |
+| `assets/audit-prompt.md` | Step 5, when launching the three audits |
+| `assets/security-vectors.md` | When delegating to audit A — defines the 12 return-path vectors that `pack-smoke.sh` runs |
+| `assets/pack-authoring.md` | Step 2-A (maintainer) · criteria for prebuilding seams |
+| `assets/pack-resource-template.md` | Hand it to the subagent that authors or audits a pack resource file (maintainer) |
+| `scripts/guide-gate.sh` · `scripts/pack-smoke.sh` | Run in Step 4 |
 
 ## Process principles (derived from the 2026-08-21 A/B measurement) — full mode
 
@@ -86,7 +116,7 @@ Priority: `techStack` in `orangekit.config.json` → interview only for the dime
 
 If orangekit-init has run, `techStack.presets` (the per-axis choices) and `techStack.frontend`/`app`/`backend` are already
 filled in. **Read every axis and treat them as a combination** — generating from one axis alone yields guides that
-have not taken each other into account (see combination dependencies below).
+have not taken each other into account ("Combination dependencies" in `assets/generation-delegation.md`).
 
 | Dimension | Example choices | Dependency rule |
 | --- | --- | --- |
@@ -131,28 +161,7 @@ premise" — the project piled its code on the stack it started with, and a patt
 guidance but guidance that is **wrong for this project**. That is why
 `--check-freshness` judges only when there is no `assembly.json` (= a first install).
 
-> **The normal path for a seam is runtime generation.** Lowering the prebuild unit from combinations (32) to axes (13)
-> was the point of v3.12.0, and prebuilding seams per combination as well amounts to reversing that
-> decision. Generate **once** per combination and put it in the cache with `install-guide.sh --save-seam`, and
-> from the second project on the same combination there is no generation at all.
->
-> **The criterion for prebuilding anyway** is not speed but the audit-and-repair loop — not making every user
-> repeat the loop the maintainer went through once. Ship only when **all** of the following hold:
-> ⓐ a combination judged to be used often ⓑ the maintainer finished the audit and repairs to the end
-> ⓒ **it is included in the seam regression of `--self-test`** — if it is not re-verified automatically every time
-> a pack is fixed, a prebuilt seam becomes a source of drift.
-> Currently shipped: `nextjs+supabase` · `react-vite+aws-container` (since v3.35.0 **backend only** — the frontend is the react-vite pack hub) · `vue+node-api`.
->
-> **Pack hubs replace seams (v3.35.0).** A pack that follows the standard wire contract (`guides/contracts/`) carries the API client,
-> complete example and endpoints inside the pack, carries auth as `variants/auth/<method>/`, and carries its hub as `HUB.md`.
-> When the other axis is on the same contract too, that combination completes with no seam. Currently: `react-vite` · `fastify` · `react-native`.
-> The more of the remaining HTTP packs move to this shape, the more combination seams are left only for real combination dependencies such as BaaS and hybrid shells.
->
-> **The cache tells you the promotion candidates.** The same combination piling up in `~/.claude/orangekit/seam-cache/`
-> is itself the evidence of frequency — the maintainer picks from that list. Instead of prebuilding 28 combinations,
-> promote **only what demand has proven**. Promotion procedure: move the cached copy into `guides/seams/<combination>/`
-> → put it through the three audits → fold it into the seam regression of `--regress`. Miss the last step
-> and that seam silently diverges every time a pack is fixed.
+> Runtime generation is the normal path for a seam, and prebuilding is something the maintainer does only for combinations that demand has proven. For what ships today, how pack hubs replace seams, and the promotion procedure, see "Criteria for prebuilding seams" in `assets/pack-authoring.md`.
 
 **Before using a pack, check `fixesVariants` in `pack.json` against the project's confirmed dimensions.**
 An axis pack nails down variants such as framework and ORM (`aws-container` is Hono + Drizzle,
@@ -192,59 +201,7 @@ fragment makes it diverge from the other combinations and the pack loses its mea
 
 ### Combination dependencies — the two guides are functions of each other
 
-**Change one axis and the other axis's guide changes too.** Measured: with the same Supabase backend,
-pairing it with Next.js centred the guide on Route Handlers · Server Actions · middleware session refresh,
-while pairing it with a React+Vite SPA centred it on Edge Functions · direct browser calls · RLS as the sole defence —
-**a completely different backend-guide** came out.
-
-The two things you must always hand the generating subagent:
-
-| Item | Source | Effect on the two guides |
-| --- | --- | --- |
-| **Where the server code lives** | `notes.serverCode` of the frontend preset | The whole "standard handler shape" slot of backend-guide. If the frontend has a server runtime, there; if not, in BaaS functions · serverless functions · a self-built server |
-| **Where the security boundary is** | `notes.securityBoundary` of the backend preset | The auth/authorization slots on both sides. With a server runtime, an application-layer check + a data-layer policy as a double defence; with an SPA, the data-layer policy is effectively the only boundary |
-| **Whether the data layer has a policy engine** | `notes.securityBoundary` · `dataModeling` of the backend preset | **The variable that splits things most.** If there is one (RLS · Security Rules), write on the premise of a double defence; if there is none (DynamoDB and the like), write on the premise that a missing application-layer ownership check is itself a data leak. Get this wrong and the guide makes the reader believe they are safe |
-| **Whether the language is TS or JS** | `techStack.frontend.language` · `notes.language` of the preset | Whether the type-standard slot lives or dies. For JS, replace that slot with JSDoc conventions · runtime schema validation, and do not include a generated-types section |
-| **Whether the client is a browser or an app** | `techStack.clientKind` (derived from `deliveryModel`) | Whether four backend-guide slots live or die. See the table below |
-| **What the product form is** | `techStack.deliveryModel` · `pwa` | Whether the offline · shell slots of frontend-guide live or die. See the table below |
-
-**Slots split by the product form (`deliveryModel`)** — the pack merely holds the slots and **the generator decides**
-**whether each is filled or left empty.** Nailing form-specific content into the pack as prose turns it into wrong guidance in every other combination.
-
-| frontend-guide slot | `web` | `web`+`pwa` | `hybrid` | `cross-platform` · `native` |
-| --- | --- | --- | --- | --- |
-| Offline · install | Empty | Service worker · manifest · offline cache · install prompt · update strategy | Owned by the shell | With no web screen axis there is no frontend-guide at all — app-guide |
-| Shell boundary | Empty | Empty | `capacitor`: shell wiring · native bridge boundary · deep links · store review · forced update / `rn-*`: **only the web side of the bridge contract** (the rest is app-guide) | — |
-
-| app-guide slot | `hybrid` + `rn-webview` | `hybrid` + `rn-native-screens` | `cross-platform` · `native` |
-| --- | --- | --- | --- |
-| Screens · navigation | A single webview container | Transition rules between native screens ↔ webview screens | The whole app |
-| Bridge contract | App-side receipt · origin verification | The same + the path by which native screens read web state | Empty |
-| Permissions · device features | Push · permissions | Push · permissions · maps · camera · location | The whole app |
-| Release | Store + what OTA can cover | The same | The same (Flutter · Swift · Kotlin have no OTA) |
-
-| backend-guide slot | `clientKind: browser` | `clientKind: app` |
-| --- | --- | --- |
-| Client auth transport | Cookie session · CORS · CSRF defence | **Bearer + secure storage** (not cookies) |
-| Idempotent ingest | Empty | **Lives** — offline batch sync is the premise. A resend must not be applied twice |
-| Push delivery | Empty | Lives (FCM/APNs) |
-| API version negotiation | Empty | Lives — because older app versions keep running |
-
-**An empty slot is the normal path.** A web project's backend-guide having no push section is not a defect
-but the result of the dimension working — forcing an empty slot full invents a requirement the project does not have.
-
-**Conflict detection — `hybrid` × `nextjs`**: a Capacitor shell carries static assets, so
-`output: 'export'` is forced and Server Actions · Route Handlers cannot be used. When this combination arrives,
-**state the constraint** in the guide and write it with the server features placed on the backend axis.
-
-**Whether a policy engine exists is not one line of wording but the premise of the whole guide.** Carrying the
-"RLS is the backup, so the application check is a double defence" wording used in a BaaS combination straight
-over to a combination with no policy engine makes it exactly the opposite guidance — the security axis of the Step 5 audit is what catches this contamination.
-
-The frontend-guide slots **data fetching · routing/auth · complete example** depend on the backend choice.
-The backend-guide slots **API endpoints · complete example** depend on the frontend choice.
-The remaining slots (styling · state management · component patterns / data access · validation · testing) close
-inside the axis — they largely hold up when the combination changes.
+Change one axis and the other axis's guide changes too (the same Supabase backend gave a completely different backend-guide with Next.js and with a React+Vite SPA). Where the server code lives, where the security boundary is, whether a policy engine exists, the language, `clientKind` and `deliveryModel` decide which slots live or die — **read "Combination dependencies" in `assets/generation-delegation.md` and hand it to the generating subagent along with the rest.** Whether a policy engine exists is not one line of wording but the premise of the whole guide, and the security axis of the Step 5 audit is what catches this contamination.
 
 ## Step 2-B: refresh — moving an installed guide to a new major
 

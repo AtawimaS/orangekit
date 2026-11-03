@@ -1,6 +1,6 @@
 ---
 name: execution-dashboard
-description: Use when you want to see which skills, rules, and hooks were referenced during this session. Presents a timeline plus a per-category summary. Triggered by keywords such as "execution trace", "execution flow", "what did you reference?", "which skills did you use?". manual invocation only.
+description: Shows the skills, rules, and hooks referenced in this session as a timeline plus a per-category summary. Use for "execution trace", "execution flow", "what did you reference?", or "which skills did you use?". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -9,6 +9,16 @@ disable-model-invocation: true
 Tracks the Skills/Rules/Hooks/Agents/documents used in the current session and produces a timeline plus a per-category summary report.
 
 ## Workflow
+
+Copy this checklist into your response to show progress:
+
+```
+- [ ] 0 Read the instrumentation logs
+- [ ] 1 Analyze the session (mark each item instrumented/inferred)
+- [ ] 2 Timeline
+- [ ] 3 Per-category summary
+- [ ] 4 Output (summary first, timeline second)
+```
 
 ### Step 0: Pull in the instrumentation logs (deterministic data)
 
@@ -70,6 +80,6 @@ If there are no instrumentation logs and everything is inferred, **say so on the
 
 ## Cautions
 
-- If the conversation is long, analyze only the most recent 50 messages
-- Do not infer information that is not in a system reminder — omit it instead
-- If the `.claude/.orangekit/` logs are missing, skip Step 0 and analyze the conversation only (state in the report that the data is inferred)
+- If the conversation is long, analyze only the most recent 50 messages (reading more adds tokens without making the timeline more accurate)
+- Do not infer information that is in neither the conversation nor the logs — omit it
+- If the `.claude/.orangekit/` logs are missing, skip Step 0 and analyze the conversation only (apply the first-line notice from Step 4)

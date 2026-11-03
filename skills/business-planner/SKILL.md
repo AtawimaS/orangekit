@@ -1,6 +1,6 @@
 ---
 name: business-planner
-description: Validates an idea or feature from a business standpoint and produces a business plan. Use for "business planning", "business model", "monetization", "market entry", "viability analysis", and for new features that need a revenue-model or market-entry decision.
+description: Checks whether an idea or feature actually makes money and produces a business plan (target, revenue model, pricing, market entry, risks). Use when asked "will this make money", "can we charge for it", whether it still pays after fees and costs, for business planning, business model, monetization, or viability analysis, and for new features that involve billing. If only external facts need checking, use /research.
 ---
 
 # Business Planner
@@ -9,6 +9,16 @@ Validates an idea or feature from a business standpoint and produces a structure
 Establishes the business case for "why should we build this?"
 
 ## Workflow
+
+Copy this checklist into your response to show progress (the table in Step 1 decides which Steps to skip).
+
+```
+- [ ] Step 1 Identify the input
+- [ ] Step 2 Integrate the research
+- [ ] Step 3 5C analysis
+- [ ] Step 4 Design the business model
+- [ ] Step 5 Save and confirm
+```
 
 ### Step 1: Identify the input and set the scope of analysis
 
@@ -50,7 +60,7 @@ Design the business model from the 5C analysis.
 
 ## Reference documents
 
-`references/business-frameworks.md` is 234 lines. **Read only the section for the current Step** —
+`references/business-frameworks.md` is 243 lines. **Read only the section for the current Step** —
 reading it whole burns half the context before the 5C questions even start.
 
 | Step | Section to read |

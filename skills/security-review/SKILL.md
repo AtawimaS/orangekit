@@ -1,11 +1,22 @@
 ---
 name: security-review
-description: Audits the whole codebase for security vulnerabilities and produces a report by severity. Use for pre-release checks, full security audits, dependency CVE checks, exhaustive secret sweeps, and payment/sensitive-data security review. To see only vulnerabilities newly introduced in a branch diff, use Claude Code's built-in /security-review — this skill covers the full audit, dependencies, secrets and payments, and the built-in tool does not cover those areas.
+description: Audits the whole codebase for security vulnerabilities and produces a report by severity — including dependency CVEs, an exhaustive hardcoded-secret sweep, and review of auth, payment, and personal-data handling. Use for a pre-release check, a repository-wide security audit, or "look everywhere for anything risky". To see only vulnerabilities newly introduced by the current branch's changes, use the built-in /security-review.
 ---
 
 # Security Review
 
 OWASP Top 10 based vulnerability inspection and structured report generation.
+
+Copy this checklist into your reply and tick it off as you go (the Step 1 table decides which Steps to skip per scope):
+
+```
+- [ ] Step 1 Decide the scope + pick references
+- [ ] Step 2 Secrets and config defaults
+- [ ] Step 3 Input validation and authn/authz (run the vectors)
+- [ ] Step 4 Dependencies and static analysis
+- [ ] Step 5 Payment/sensitive data (if applicable)
+- [ ] Step 6 Report (including the "could not judge" section)
+```
 
 ## Workflow
 
@@ -18,6 +29,7 @@ OWASP Top 10 based vulnerability inspection and structured report generation.
 | Targeted review | security check of a specific domain/feature | only the given paths | 2 → 3 → 6 |
 
 **Then pick only the references that match the project** — a standard that does not apply eats context and adds no findings.
+Read the reference files; do not execute them (there are no scripts).
 
 | If the project | Read |
 |-----------|--------|

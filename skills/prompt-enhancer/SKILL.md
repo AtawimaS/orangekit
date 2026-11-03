@@ -1,6 +1,6 @@
 ---
 name: prompt-enhancer
-description: Enhance user prompts by analyzing project context (code structure, dependencies, conventions, existing patterns). Use when users provide brief development requests where what to build is already settled but the project context is missing. If what to build is still undecided, use /brainstorming first — it hands its approved design to this skill.
+description: Turns a briefly stated development request into an implementable instruction by enriching it with the project's code structure, dependencies, conventions, and existing patterns. Use when what to build is already settled but the project context is missing — one- or two-line feature requests like "just add this" — and when handing a design approved by /brainstorming over to implementation. If what to build is still undecided, use /brainstorming first.
 ---
 
 # Prompt Enhancer
@@ -52,7 +52,7 @@ Enhances it with project context + implementation scope + detailed requirements 
 
 ### Step 4: Confirm with the user
 
-**Do NOT implement** until the user confirms. The goal is to produce a clear request to hand to the next Phase.
+Do not implement until the user confirms — this skill's goal is a clear request to hand to the next Phase, not an implementation, and implementing before confirmation locks in a wrong premise.
 
 ## Reference documents
 

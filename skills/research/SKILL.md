@@ -1,6 +1,6 @@
 ---
 name: research
-description: Performs web-search-based research on a given topic and produces a structured document in dev/docs/research/. Use for competitor analysis, market research, technology research, user research, and whenever an external fact needs checking.
+description: Researches external facts by web search and leaves a sourced document in dev/docs/research/. Use for competitor analysis, market, technology, or user research, and whenever up-to-date external information must be checked — a library's maintenance status, pricing, policies. If a viability judgment is also needed use /business-planner; for search-visibility optimization use /seo-strategy.
 ---
 
 # Research
@@ -14,6 +14,17 @@ A skill that gathers public web information on a given topic and produces a stru
 - Complete coverage of local-language data
 
 ## Workflow
+
+Copy this checklist into your reply and tick it off as you go.
+
+```
+- [ ] 1 Identify the type
+- [ ] 2 Check existing research
+- [ ] 3 Check user-provided data
+- [ ] 4 Collect information
+- [ ] 5 Generate the document from the template
+- [ ] 6 Self-check and save
+```
 
 ### Step 1: Identify the research type
 
@@ -73,7 +84,7 @@ mark it "date unknown".
 
 ### Step 5: Produce the structured document
 
-Read the template for the Step 1 type from `resources/research-templates.md` and fill it in as it is.
+Read the template for the Step 1 type from `resources/research-templates.md` and fill it in as it is (a strict template).
 **Do not add a section the template does not have** — if the structure varies from run to run, the PRD cannot
 take this document as-is.
 
@@ -93,11 +104,11 @@ Self-check before saving — if even one check fails, do not save and report tha
 
 | File | When to read it |
 | --- | --- |
-| `resources/research-templates.md` | **In Step 5 only.** Once the type is settled, read only that type's section (do not read all 281 lines) |
+| `resources/research-templates.md` | **In Step 5 only.** Once the type is settled, read only that type's section (do not read all 293 lines) |
 | `dev/docs/research/` | Step 2 — checking for existing research |
 
 ## Pitfalls
 
-- Always check the date on a WebSearch result — a three-year-old price list looks current
+- Check the date on a WebSearch result — a three-year-old price list looks current
 - Guard against search-term bias — search for "failure", "problem", and "limitation" keywords too
 - Do not present a single source's figure as "the market size" — if there is only one source, say so

@@ -1,6 +1,6 @@
 ---
 name: prd-generator
-description: Generates a PRD when a new feature is requested and dev/docs/prd/ has none for it. Picks either a single PRD or a modular PRD (prd-overload + Phase Sub PRDs + Shared) depending on the size of the service.
+description: Creates a PRD (product requirements document) for a feature that has none yet in dev/docs/prd/, as a single or modular PRD depending on scale. Use when the feature and screens are settled and a spec document is needed to hand to the dev team, or when the user says "write a PRD". To check an existing PRD use /prd-reviewer; for the implementation plan that follows a PRD use /dev-docs-generator.
 ---
 
 # PRD Generator
@@ -14,6 +14,17 @@ description: Generates a PRD when a new feature is requested and dev/docs/prd/ h
 | Anything else | Collect only what is missing |
 
 ## Core workflow
+
+Copy this checklist into your reply and tick it off as you go.
+
+```
+- [ ] 1 Search existing PRDs
+- [ ] 2 Collect requirements
+- [ ] 3 Decide the mode
+- [ ] 4 Generate the PRD (S or M)
+- [ ] 5 Save
+- [ ] 6 User confirmation
+```
 
 ### Step 1: Search for an existing PRD and decide
 
@@ -40,7 +51,7 @@ Ask only for what is missing (the same principle as the four entry-condition sta
 
 ### Step 4-S: Generate a single PRD
 
-Follow the form of `assets/prd-template.md`. **Every run must produce the same structure** —
+Follow the form of `assets/prd-template.md` **exactly** (a strict template). **Every run must produce the same structure** —
 add a section the template does not have only when the user asks for it.
 
 ### Step 4-M: Generate a modular PRD
@@ -61,4 +72,4 @@ If the PRD is edited after confirmation, point the user to prd-reviewer's "verif
 
 ## Using the project context
 
-When generating the PRD, consult CLAUDE.md, dev/docs/, and .claude/rules/.
+When generating the PRD, consult `CLAUDE.md`, `dev/docs/`, and `.claude/rules/`. Read the template `assets/prd-template.md` in Step 4.

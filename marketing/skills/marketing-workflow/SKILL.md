@@ -1,6 +1,6 @@
 ---
 name: marketing-workflow
-description: Orchestrates the marketing content pipeline — runs AI prompt generation → scroll-animation site building → SEO optimization in sequence and consolidates the output under dev/docs/marketing/. Use for "marketing campaign", "product landing page", "scroll-stop content", "marketing pipeline". Individual stages are /scroll-stop-prompter · /scroll-stop-builder · /seo-strategy. Manual invocation only.
+description: Runs the marketing content pipeline in order — AI prompt generation, scroll-animation site building, then SEO optimization — and consolidates the results under dev/docs/marketing/. Use when the user asks for a "marketing campaign", "product landing page", or "marketing pipeline". For a single stage only, use /scroll-stop-prompter, /scroll-stop-builder or /seo-strategy. Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -13,6 +13,17 @@ An orchestrator that runs the 3 stages of the marketing content pipeline in sequ
 Completely independent of the code workflow. Output is stored under `dev/docs/marketing/`.
 
 ## Workflow
+
+Copy the checklist below into your response to show progress (keep only the stages of the mode chosen in Step 1).
+
+```
+- [ ] Pick the mode
+- [ ] Initialize the campaign (directory · context.md · progress.md)
+- [ ] Stage 1 prompt generation → user confirmation
+- [ ] Stage 2 site building → user confirmation
+- [ ] Stage 3 SEO optimization
+- [ ] Campaign summary
+```
 
 ### Step 1: Pick the pipeline mode
 

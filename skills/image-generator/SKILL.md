@@ -1,6 +1,6 @@
 ---
 name: image-generator
-description: Use for requests to generate raster images — images, icons, illustrations, mockups, OG/hero art. With an API key it generates with gpt-image-2.5-flare; without one it produces a prompt you paste straight into ChatGPT for the same result. Diagrams and charts go to diagram-design; design systems go to ui-ux-design.
+description: Creates raster images such as icons, logo drafts, illustrations, mockups, OG images, and hero art — with an API key it generates directly with gpt-image-2.5-flare, without one it produces a prompt to paste into ChatGPT. Use when a picture, thumbnail, cover image, or app icon is needed. Diagrams and charts go to diagram-design; design systems (color, fonts) go to /ui-ux-design.
 ---
 
 # /image-generator — raster image generation
@@ -98,7 +98,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/image-gen.sh \
   high is **35 times** low — not a value for the exploration stage
 - For a long prompt use `--prompt-file <file>` (avoids shell quoting accidents)
 
-**Step 4 verification is part of the same move.** The script checks file existence, non-zero bytes and
+**Verification is part of Step 3's single move.** The script checks file existence, non-zero bytes and
 the format signature, and prints the response's `usage` **exactly as measured**. Pass those numbers to
 the user — say "it cost this much", not "it would have cost about this much".
 

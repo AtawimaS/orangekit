@@ -2,6 +2,18 @@
 
 The output document structure for each research type. Referenced from Step 5 of SKILL.md.
 
+## Contents
+
+- Shared header (all types)
+- Shared footer (all types)
+- Type 1: Competitor analysis
+- Type 2: Market research
+- Type 3: Technology research
+- Type 4: User research
+- Type 5: Open topic
+- Confidence criteria
+
+
 ---
 
 ## Shared header (all types)

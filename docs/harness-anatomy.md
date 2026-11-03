@@ -1135,6 +1135,22 @@ Bringing playwright in as a devDependency and actually passing the fixtures grew
 
 ## 08 — Operations
 
+### Version units — a small change is a patch, only a big change is a minor, a major is a launch
+
+All three plugins (`orangekit-product` · `orangekit-marketing` · `orangekit-harness`) use the same rule.
+There is one deciding question: **is there anything consumers must newly learn or change?**
+
+| Unit | When | Examples |
+| --- | --- | --- |
+| **Patch** `x.y.Z` | No — a repair or adjustment of an existing asset. No new command, no new asset, nothing for the consumer to do | a false-positive fix, a ceiling or wording adjustment, reinforcing the body of one skill, a card wording fix |
+| **Minor** `x.Y.0` | Yes — a new skill, hook, agent or pack; a contract change to existing behavior; a command rename or removal (must be stated in the release notes) | a full skill overhaul + the `codex-cross-check` rename |
+| **Major** `X.0.0` | A flagship launch — **the user decides.** It is not judged automatically by size of change, and Claude never bumps it on its own | — |
+
+- When in doubt it is a patch — a minor only when the deciding question can be answered "yes"
+- Patches piling up do not turn into a minor. The nature of the change decides the minor
+- A number already published is never rewritten (earlier repair-type minors predate this rule)
+- Rule-card stamps use the same number — the installer refreshes a card when the stamp **differs**, so even a patch number reaches the consumer
+
 ### A version bump is not 4 places but 5 steps
 
 The version is bumped simultaneously in `plugin.json` · `package.json` · the README badge ·

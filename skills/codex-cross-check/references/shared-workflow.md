@@ -1,6 +1,6 @@
 # AI Review Loop — shared workflow
 
-This file is the body of the `codex-claude-loop` workflow. Per-provider differences (CLI commands · authentication ·
+This file is the body of the `codex-cross-check` workflow. Per-provider differences (CLI commands · authentication ·
 prerequisites) are defined by SKILL.md.
 
 ## Core philosophy

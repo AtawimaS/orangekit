@@ -1,20 +1,20 @@
 ---
 name: orangekit-init
-description: Initial setup for an ORANGEKIT Devkit project. Creates orangekit.config.json and CLAUDE.md. Use when setting up ORANGEKIT Devkit for the first time in a new project.
+description: Sets up ORANGEKIT Devkit in a project for the first time — a tech-stack interview (frontend, backend, DB), creation of orangekit.config.json and CLAUDE.md, and installation of the stack rule cards. Use when setting up a new project for the first time or when choosing the stack configuration again. Manual invocation only.
 disable-model-invocation: true
 ---
 
 # /orangekit-init — ORANGEKIT project initial setup
 
 ## Purpose
-Creates this project's ORANGEKIT Devkit configuration files (`orangekit.config.json`, `CLAUDE.md`) and initializes the `dev/` directory structure.
+Creates `orangekit.config.json` and `CLAUDE.md` at the project root and initializes the `dev/` structure. An existing `CLAUDE.md` is overwritten only after Step 1 confirms whether to back it up.
 
 ## Procedure
 
 ### Step 0: Measure the repo once (before asking — to cut down what you ask)
 
-**Read before you ask.** Asking about things you could have found out is where most of the interview
-time goes. Sweep the following in one pass and pre-fill the defaults for Steps 2, 4, 4.5 and 4.7:
+**Read before you ask** — asking about things you could have found out is where most of the interview
+time goes. Pre-fill the defaults for Steps 2, 4, 4.5 and 4.7:
 
 ```bash
 ls -a                                   # existing code · toolchain traces
@@ -27,9 +27,7 @@ cat tsconfig.json 2>/dev/null | head -20        # importAlias · strict
 git remote get-url origin 2>/dev/null           # vcsPlatform — github.com / gitlab.com
 ```
 
-What measurement settles: project name · framework · language · package manager · build/test/lint
-commands · source directory · importAlias · repo topology · backend axis (inferred from deps) ·
-code hosting platform.
+What measurement settles: name · framework · language · package manager · build/test/lint commands · source directory · importAlias · repo topology · backend axis (inferred from deps) · code hosting.
 
 If the remote URL contains `github.com`, **settle on** `github`; if `gitlab.com`, `gitlab`
 — do not ask. Only ask in the third call when it is self-hosted or there is no remote to decide from.
@@ -37,41 +35,7 @@ If the remote URL contains `github.com`, **settle on** `github`; if `gitlab.com`
 
 ### Step 0.5: Environment check — `jq`
 
-This harness's verification hook (`build-gate`) and `doctor --graph` only work fully when `jq` is
-present. Without it the plugin still installs and runs, but both safeguards **degrade silently,
-without a single error** (macOS does not ship it, and Windows does not include it in Git Bash either).
-
-```bash
-command -v jq >/dev/null 2>&1 && jq --version || echo "MISSING"
-```
-
-- **If present**, move on to Step 1 without saying anything.
-- **If missing**, say so briefly and ask whether to install it (a plain confirmation is enough — do
-  not spend `AskUserQuestion` budget):
-
-  > "`jq` is missing, so build verification and graph verification start in a degraded state. Install it now?"
-
-  Detect the package manager and pick the command (use the first one found):
-
-  | Detected | Install command |
-  | --- | --- |
-  | `command -v brew` | `brew install jq` |
-  | `command -v winget` | `winget install --id jqlang.jq -e --source winget` |
-  | `command -v apt-get` | `sudo apt-get install -y jq` |
-  | `command -v dnf` | `sudo dnf install -y jq` |
-  | `command -v apk` | `apk add jq` |
-  | none of the above | cannot automate — point to https://jqlang.org/download/ and skip |
-
-  For paths that need `sudo`, first try `sudo -n <command>` without a password. If that fails
-  (a password prompt would freeze the tool), **give up on running it** and merely tell the user
-  the command to run in their own terminal, then move to the next step.
-
-  A refusal or a failed install **does not block initialization** — say "Continuing without the
-  install. You can install it later with `<command>`" and proceed to Step 1.
-
-  This step covers **the `jq` install only**. If the check itself behaves strangely on Windows
-  (command not found, and so on), the cause may be a missing Git Bash, which is not what this step
-  fixes — point to [`docs/windows-setup.md`](../../docs/windows-setup.md).
+**Read `assets/preflight-jq.md` at this step and follow it exactly.** If `jq` is present, move on to Step 1 without saying anything; if missing, ask whether to install it, but a refusal or failure does not block initialization.
 
 ### Step 1: Check for existing configuration
 
@@ -100,47 +64,11 @@ the same call.** The tool's limits are **4 questions · 4 options** (the tool at
 - If one call would exceed 4 questions, load **the questions that change a list first** and push the rest to the next call
 - **Language (TypeScript/JavaScript) is not asked separately** — it stays at the preset default and is changed in the Step 4.9 confirmation summary
 - Ask only questions whose answers branch. Implementation details like "should we use the pre-built one or generate?" are not asked
-- Ask the first question **in product terms** — "pick a frontend" requires already knowing the answer,
-  while "what are you building" is something anyone can answer
+- Ask the first question **in product terms** ("what are you building", not "pick a frontend")
 
 ### Rules shared by every option list — custom · not sure
 
-**Every stack question has two exits** — for the person whose stack is not on the list, and for the person who cannot judge the list.
-**The one exception is ⑩** — its 4 option slots are filled by real frameworks, so there is no "Not sure" slot. The parent ⑥
-has "Not sure", and at ⑩ writing "recommend" in the custom field takes the same recommendation path.
-
-**Custom** — present the free-input field the tool attaches as "Custom (type it in)".
-
-- If the input matches a pack name or alias, **normalize it to that pack** — "Express" → `node-api`,
-  "NestJS" → `node-nest`, "Hono" → `aws-container`, "vanilla JS" → `vanilla`,
-  "Expo" → `react-native`, "SwiftUI" → `ios-swift`
-- If it does not match, write **`custom`** to `presets.<axis>` and write the entered name as-is into that axis's `framework`
-  (· `language`). **Never invent a preset name** — `presets` values are a schema
-  enum. An invented name (`expo-universal` and the like) is not found by install-guide and drifts onto the generation path,
-  and what the user actually picked disappears from the record
-- A `custom` axis gets its empty dimensions (DB · ORM · commands) in the 4th call — the preset fills nothing in
-
-**Not sure** — when this is picked, slot **just one more question into the next call**: "Get a recommendation" / "Decide later".
-
-- **Get a recommendation** — ask at most 2 of the deciding questions below, then give one recommendation with a one-line reason. The
-  recommendation is confirmed again in the Step 4.9 confirmation summary. Writing "recommend" in the custom field takes the same path
-- **Decide later** — write **`undecided`** to `presets.<axis>`. No guide is built for that axis; it is
-  decided later with `/stack-guide-generator`. If the product form itself is left undecided, do not write `deliveryModel` ·
-  `clientKind`, and set the screen axes (`frontend` · `app`) to `undecided` — fill in the default `web`
-  and browser guidance ships to an app project
-- **If ① is "Mobile app", `clientKind` is settled as `app` even when what follows is undecided** — even with the approach, shell and
-  framework left as "decide later", write `clientKind: "app"`. Leave it empty and the backend guide
-  drifts into the `browser` slots (cookie session · CSRF). How undecided and custom values are recorded is set by the mapping table in Step 2
-
-| Question | Deciding questions (at most 2) | Recommendation |
-| --- | --- | --- |
-| ① product form | Must it be installed from a store? · Does it lean heavily on camera · location · push? | no to both → web · install needed but web screens are enough → mobile app (hybrid) · device features are the core → mobile app (cross-platform) |
-| ⑤ app approach | Do you also ship a web version? · Do you have dedicated developers per platform? | ships web too → hybrid · dedicated per-platform developers and platform-native UX matters → fully native · otherwise → cross-platform |
-| ⑤ web framework | Does search visibility (SEO) matter? | yes → `nextjs` · no → `react-vite` |
-| ⑨ app shell | Are there screens the web cannot build (high-performance maps · burst capture · background location)? | yes → RN shell + native screens · no → Capacitor |
-| ⑨ cross-platform | Does the team use React · TypeScript? | yes → `react-native` · no → `flutter` |
-| ② backend type | Is there someone to run servers and a DB? · Are the server rules complex, like payments · settlement · external integrations? | no one to run it → BaaS (`supabase`) · someone, and complex → self-hosted server · already on AWS with spiky traffic → serverless |
-| ⑥ self-hosted server language | The team's main language? · Is AI · data processing the core? | the same TS as the web → TypeScript (`fastify`) · AI · data → Python (`fastapi`) · performance and memory come first and someone knows Rust → Rust |
+**Read `assets/interview-choices.md` at this point** — the pack normalization of custom input, the handling of "Not sure", and the table of deciding questions are there. "Not sure" adds one more question, "Get a recommendation" / "Decide later", to the next call; "Decide later" is recorded as `undecided` in `presets.<axis>`, and custom input that matches no pack is recorded as `custom`. If ① is "Mobile app", `clientKind` is settled as `app`.
 
 ### Step 2: Preset selection (interactive)
 
@@ -156,10 +84,7 @@ dimensions turn that pack's **conditional slots** on and off.
   4. Not sure
 ```
 
-**What this question settles** is not just the screen list. `deliveryModel` and its derived value
-`clientKind` (`browser` for web, `app` for the rest) split **the slots of the backend and infrastructure
-guides** too — whether the token goes in a cookie or secure storage, whether the idempotent batch ingest,
-push and API version negotiation sections come alive. **It is information that is unreachable unless you ask.**
+① splits not just the screen list but, through `deliveryModel` and its derived value `clientKind`, **the slots of the backend and infrastructure guides** too — it is information that is unreachable unless you ask (slot table below).
 
 ```
 ⑤ What do you build the screens with:   ← ① splits the question itself
@@ -267,9 +192,7 @@ shell question settles whether the app axis exists.
       3. Custom                       — GCP · Azure · Vercel · on-premises
 ```
 
-**`fastapi` is Python and `rust-axum` is Rust** — the toolchain splits from the web screen axis, so take per-axis commands
-separately (Step 4). `rust-axum` has no pre-built pack, so its guide takes the generation path —
-it is on the list **because it is a common choice, not because it has a pack.**
+`fastapi` (Python) and `rust-axum` (Rust) split the toolchain from the web screen axis, so take per-axis commands separately (Step 4). `rust-axum` has no pre-built pack and takes the generation path — it is on the list because it is a common choice.
 
 **Record the product form in `techStack.deliveryModel`** (`web` · `hybrid` · `cross-platform` · `native` · `api-only`).
 For "Web" also fill `techStack.pwa`; for "Hybrid" fill `techStack.appShell`.
@@ -278,8 +201,7 @@ And **write the derived value into the config alongside it**:
 > `clientKind = (deliveryModel === 'web') ? 'browser' : 'app'`
 
 If each pack re-derives it on its own the descriptions diverge, so **decide it in one place and let
-the packs read only this value.** Hybrid, cross-platform and native are all the same from the backend's point of
-view — not "a browser talking to a server" but **"an app talking to an API"**.
+the packs read only this value.** Hybrid, cross-platform and native are all "an app talking to an API" from the backend's point of view.
 
 | Slot | `browser` | `app` |
 | --- | --- | --- |
@@ -288,8 +210,7 @@ view — not "a browser talking to a server" but **"an app talking to an API"**.
 | Push delivery | empty | alive (FCM/APNs) |
 | API version negotiation | empty | alive — old app versions keep running |
 
-**An empty slot is the normal path.** A web project's backend guide having no push section is not a
-defect; it is the dimension working correctly.
+An empty slot is the normal path — a web project's backend guide having no push section is not a defect.
 
 > **Conflict warning — "Hybrid" × `nextjs`**: an app shell carries static assets, so
 > `output: 'export'` is forced and **Server Actions and Route Handlers cannot be used.** When this
@@ -301,26 +222,16 @@ defect; it is the dimension working correctly.
 dimension already in the schema (`null` when "undecided"). When this value is empty a cloud-agnostic
 guide ships; when it is filled, Step 4.5 and Step 9.5 treat that cloud's infrastructure guidance as a requirement.
 
-> **Why ask for the type first** — "AWS" is not a backend framework but a deployment target. Yet
-> treating the cloud as a **freely combinable axis** alongside frontend and backend breaks two things.
-> ⓐ `aws-container` (a Hono container) and `aws-serverless` (Lambda handlers) share only the cloud;
-> **the frameworks themselves differ** — "same framework, just swap the cloud" does not hold.
-> ⓑ It conflicts with the decision to make the pre-built unit an axis rather than a combination
-> (`docs/presets.md`), and combinations explode. So **infrastructure is treated as an independent
-> dimension only in the resident-server family** — for serverless and BaaS the cloud is the architecture, not something to separate.
+> **Why ask for the type first** — `aws-container` (Hono) and `aws-serverless` (Lambda) share only the cloud;
+> the frameworks differ. Treating the cloud as a freely combinable axis makes combinations explode (`docs/presets.md`),
+> so **infrastructure is an independent dimension only in the resident-server family** — for serverless and BaaS the cloud is the architecture.
 
-**Language (TypeScript/JavaScript) is a dimension, not a preset, and so is the product form.** Axes
-pick which pack to use; dimensions **turn that pack's conditional slots on and off** — language splits the
-type-standard slot, product form splits the offline, shell, auth-transport and push slots. That is why
-**a pack itself must hold for any combination of dimensions, and specialization happens at generation time.**
-Nail dimension-specific content into a pack as prose and that pack tilts toward one form and becomes wrong guidance for every other combination.
+Language and product form are dimensions, not presets — a pack must hold for any combination of dimensions, and specialization happens at generation time.
 
-> **Why several axes**: guide content is not a function of one axis but **a function of the combination**.
-> The same Supabase paired with Next.js centers on Route Handlers and Server Actions; paired with a
-> React+Vite SPA it centers on Edge Functions and direct browser calls — **an entirely different guide**.
-> **The app axis is separate from the web screen axis** because, as with a hybrid RN shell, web screens and app code
-> **live in one product** — put them on one axis and one of the two vanishes from the record. The only app axis pack is
-> `react-native` (something is pre-built only when it can be registered as an audit target) — the other app values take the generation path.
+> **Why several axes**: guide content is a function of the combination — the same Supabase centers on Route Handlers
+> and Server Actions with Next.js, and on Edge Functions with React+Vite. The app axis is separate from the web screen axis
+> because in a hybrid the two live in one product. The only app axis pack is `react-native` (something is pre-built
+> only when it can be registered as an audit target); the other app values take the generation path.
 
 `frontend: none` is the result of choosing "API only" in ① or of building only a cross-platform or native app —
 it is a consequence of the product form, not an option on the web screen axis, so it is not asked in ⑤. A combination
@@ -440,13 +351,11 @@ If it is hard to choose — is there code right now that two or more places use?
   API (`apps/api`), say. Each becomes that axis's `sourceDir`, and **all** of them go into the Step 7.5 card `paths:`.
   Take only one and the structure card never loads over the other axes' code
 
-> **Why the options carry explanations** — with only a default and no basis for judgement the user
-> just presses the default, and a one-app project starts out carrying an empty `packages/`.
-> The deciding question is not scale but the single question **"is there code right now that two or
-> more places use?"** — ask by scale and you get "it will probably grow", which is not a basis.
->
-> And what structure protects is **only up to the review requirement**. What actually tells you
-> "I fixed A and B broke" is B's tests; structure only makes it possible to run those tests independently.
+> **Why the options carry explanations** — a default with no basis for judgement just gets pressed, and a
+> one-app project starts out carrying an empty `packages/`. The deciding question is not scale but the single
+> question **"is there code right now that two or more places use?"** — ask by scale and you get "it will
+> probably grow", which is not a basis. Structure protects only up to the review requirement; what tells you
+> B broke is B's tests.
 
 ### Step 4.9: Confirmation summary — show it once before writing any file
 
@@ -469,9 +378,8 @@ Confirmation summary — recording this as-is:
 - **Changes to defaults such as language (TypeScript/JavaScript) and UI toolkit are taken here** — they are not asked separately
 - Say so for a `custom` or `undecided` axis — it means there is no prebuilt rule file. For `custom`, Step 9.5 asks you to choose among a rule file (backed by the official docs) · rule file + detailed guide · create nothing
 
-**Right after showing the table, ask with `AskUserQuestion` — do not ask in text and end the turn.**
-Ending with "tell me if anything needs fixing" leaves the user waiting without knowing what to type
-to move on. A single choice must split proceeding from editing:
+**Right after showing the table, ask with `AskUserQuestion` — do not ask in text and end the turn**
+(the user is left waiting without knowing what to type). This confirmation does not count toward the interview call budget (calls 1–4):
 
 ```
 Question: Create the files with this configuration?
@@ -486,7 +394,6 @@ Question: Create the files with this configuration?
   for the chosen items (never restart the interview), fix the values, then **show the table again and
   return to the confirmation question above**
 - If the free input already carries the change (e.g. "backend auth should be Auth0"), fix just that value and return to the table
-- This confirmation does not count toward the interview call budget (calls 1–4) — it is the only gate before files are written
 
 ### Step 5–6: Create orangekit.config.json · CLAUDE.md
 
@@ -517,55 +424,21 @@ Cards installed:
 > This table must reflect the real frontmatter in `rules/`. When a card is added or changed, fix this too
 > — `doctor --fast` detects a card-count mismatch.
 
-**Always verify after installing**:
+Verify after installing:
 
 ```bash
 ls .claude/rules/
 ```
 
-Zero files means the install failed. Report to the user and stop.
+Zero files means the install failed — report to the user and stop.
 
-> **Skipping this step is recovered in the next session** — the `session-brief` hook automatically
-> runs `install-rules.sh --missing-only` when `orangekit.config.json` exists and cards are missing.
-> Run it here anyway: work that needs the rules may follow immediately in this session, and the hook
-> installs **only what is missing**, it does not refresh outdated versions.
->
-> The always-on norms (T0) are not a file; the `session-brief` hook prints them every session.
-> They are plugin-owned, so they update automatically and the project cannot modify them.
+> Skipping it is recovered in the next session — the `session-brief` hook runs `install-rules.sh --missing-only` —
+> but the hook installs **only what is missing**, does not refresh outdated versions, and does not wait for work that needs the rules in this session.
+> The always-on norms (T0) are not a file; the `session-brief` hook prints them every session (plugin-owned).
 
 ### Step 7.5: Create project-specific rule cards (project-owned)
 
-Where Step 7's cards are **plugin-owned** (auto-refreshed by a version stamp), this step's two cards
-are **project-owned** — they hold this project's real structure and conventions, and the project manages them from then on.
-
-1. Read `${CLAUDE_PLUGIN_ROOT}/templates/rules/project-structure.template.md`
-2. **If there is existing code, measure the real tree** (`ls` + the main directories 2–3 levels deep) —
-   do not fill it in by guessing. For a new project, fill in the target structure from the preset + the Step 4.7 topology
-2.5. **Fill the "dependency direction" section** — if there is existing code, measure the direction
-   imports actually flow; if new, write the direction of the preset topology. If there are no layers,
-   write "single layer — not applicable". **Do not force one into existence** — write a layer into
-   the card that does not exist and `orangekit-reviewer` will report violations that do not exist
-3. Substitute or remove every placeholder and guidance comment and save it under `.claude/rules/`
-   as `project-structure.md`
-4. `${CLAUDE_PLUGIN_ROOT}/templates/rules/code-conventions.template.md` the same way —
-   keep **only the one stack block** matching the preset and keep the shared blocks (naming · code
-   style · commit conventions). If existing lint settings or CLAUDE.md carry project-specific
-   conventions, confirm with the user and fold them in, then save as `code-conventions.md`
-5. Check that both cards' `paths:` frontmatter points at the **real source directory** (the Step 4
-   input) — if paths are wrong the card is never loaded.
-   **Also check the paths the topology requires** — for `monorepo` the shared package path, for
-   `msa` the service roots, must actually exist in `paths:`. **If they do not, do not save the card**;
-   go back to Step 4.7 and Step 4, settle the paths, and generate again.
-   A card that covers only the source directory never once appears over shared code —
-   such a card is worse than no card (it makes you believe there is one)
-
-> Do not put an `orangekit-rule-version` stamp in these two cards — that marks them project-owned.
->
-> **The protection mechanism is not the stamp but name non-collision.** `install-rules.sh` iterates
-> only the plugin's `rules/*.md` (`for f in "$SRC"/*.md`), so as long as `rules/` has no file of the
-> same name, they never become candidates. Therefore **do not create `project-structure.md` or
-> `code-conventions.md` in the plugin's `rules/`** — the moment you do, the unstamped target is read
-> as `0.0.0` and the project's copy is overwritten (a `.bak` remains, but it is a silent loss).
+**Read "Step 7.5" in `assets/project-cards-and-report.md` and follow it exactly.** Build the two cards `project-structure.md` and `code-conventions.md` from measurement, and check that `paths:` covers the source and topology paths.
 
 ### Step 8–9.5: dev/ · .gitignore · stack rule files (the detailed guide is opt-in)
 
@@ -573,35 +446,8 @@ are **project-owned** — they hold this project's real structure and convention
 
 ### Step 10: Completion report
 
-```
-ORANGEKIT Devkit initial setup complete!
-
-Files created:
-  ✅ orangekit.config.json
-  ✅ CLAUDE.md
-  ✅ .claude/rules/ (N plugin rule cards + project-specific project-structure · code-conventions)
-  ✅ dev/ directory structure
-
-Stack rule files (copy the `status:` line from Step 9.5 verbatim):
-  ✅ .claude/rules/stack-<axis>-<pack>.md — installed (rules)
-  ✅ .claude/rules/stack-<axis>-<stack>.md — generated from the official docs (project-owned)   ← when "rule file only" was chosen in the three-way question
-  ·  <axis>                               — no pack (generate) — universal rules only      ← when "create nothing" was chosen, or no item had evidence
-  ·  <axis>                               — not chosen (undecided)
-
-Detailed guide skills (opt-in):
-  ·  not installed — ask for "generate guides" if needed          ← when "No" was chosen
-  ✅/⏳ .claude/skills/<axis>-guide — the `status:` line of the detailed guide path verbatim  ← when "Yes" was chosen (do not report a half as finished)
-
-Verification:
-  bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh"
-
-Next steps:
-  1. Review CLAUDE.md and fill in project-specific information
-  2. Restart Claude Code and the harness activates
-```
+**Read "Step 10" in `assets/project-cards-and-report.md` and report in that format.**
 
 ## Cautions
 
-- This skill creates files at the project root
-- If a `CLAUDE.md` already exists, always confirm whether to back it up
 - Secret blocking is **built into** the `security-check.sh` hook — it is not a project configuration item

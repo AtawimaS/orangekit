@@ -1,6 +1,6 @@
 ---
 name: web-asset-generator
-description: Generates web assets from a logo, text, or emoji — favicon set (16–512px, ICO), Apple Touch Icon, Android Chrome icons, OG/social card images, Next.js Metadata API code. Use for "favicon", "favicons", "OG image", "social card", "og:image", "apple-touch-icon", "meta image" — manual invocation only.
+description: Creates web assets from a logo, text, or emoji — favicon set (16–512px, ICO), Apple Touch Icon, Android Chrome icons, OG/social card images, Next.js Metadata API code. Use when the user asks for a "favicon", "OG image", "social card", or "apple-touch-icon". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -22,7 +22,7 @@ There is exactly one rendering engine, **Pillow** — it draws shapes and text l
 
 ### Step 2: Interview the user
 
-Collect the source image, brand colors, source type (logo/emoji), and OG generation mode (Pillow/AI).
+Collect the source image, brand colors, and source type (logo/emoji). OG images are made with Pillow (if an AI background is needed, see the note in Step 5).
 
 ### Step 3: Check dependencies
 
@@ -53,10 +53,6 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/generate_og_images.py --title "<title>" --ou
 does that job (it is a skill on the dev harness side). Pass the image you get there in as `--logo` or as the background and composite it.
 If that skill is not visible, the Pillow mode above is still the answer (solid background + text).
 
-> An earlier version wrote here that there was a "Nano Banana 2 AI mode", but **there was no implementation** —
-> no script, no argument, and no key check existed. Writing down a feature that does not exist makes the model
-> try to call it and fail. So it was fixed to point at where the real thing is.
-
 ### Step 6: Check the validation result
 
 The `--validate` flag verifies file size, image size, format compatibility, and WCAG contrast ratio.
@@ -71,4 +67,8 @@ Report the list of generated files, the validation result, and the next steps.
 
 ## Reference documents
 
-- Asset specifications: [references/specifications.md](references/specifications.md)
+Run the three scripts without reading them.
+
+| File | When to read it |
+| --- | --- |
+| [references/specifications.md](references/specifications.md) | When giving the Next.js integration code in Step 7, or when size/format specs are needed |

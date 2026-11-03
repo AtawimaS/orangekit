@@ -6,6 +6,16 @@ those originals themselves follow this spec too — spec and originals are mutua
 There are currently 3 prebuilt pairs (`nextjs`×`supabase`, `react-vite`×`aws-container`,
 `vue`×`node-api`).
 
+## Contents
+
+- Stack core card — what must be followed lives only here
+- Separating structure from content
+- Required sections (fixed order)
+- resources/ splitting rules
+- Verification — by the generator before returning, and by the main session in Step 4 (dual ownership)
+- Generation stamp format
+- Verification baseline (prebuilt guides only)
+
 > **Sync obligation**: when a stack-independent category (security · repeated UI ·
 > testing, etc.) is added to any pair of prebuilt guides (the proven originals), reflect it in the matching slot of this spec.
 > The three pairs differ on whether the data layer has a policy engine (only `supabase` has one; the other two do not), so
@@ -54,7 +64,7 @@ Each pack or generated guide has one card per axis (`guides/<axis>/<pack>/RULES.
 
 | # | Section (structure) | Content slot | Budget |
 | --- | --- | --- | --- |
-| 1 | frontmatter | `name:` matches the directory name · description takes the form "what it covers + Use when creating or modifying <task list>". **The gating prefix follows the distribution form**: a guide generated and installed into a project is for that project alone, so it **does not use** the `[Preset:]` prefix or a preset-confirmation sentence. A guide distributed as a plugin and exposed to several stacks (the 2 original nextjs-* guides) **does use** it, to prevent misfires | ≤450 characters (of the description value, excluding the `name:` line) |
+| 1 | frontmatter | `name:` matches the directory name · description is in third person and takes the form "what it covers + Use when creating or modifying <task list>" (it is called only if it has both what and when). The SKILL.md body stays under 500 lines, and resources are linked only one level deep from the hub (a resource does not call another resource). **The gating prefix follows the distribution form**: a guide generated and installed into a project is for that project alone, so it **does not use** the `[Preset:]` prefix or a preset-confirmation sentence. A guide distributed as a plugin and exposed to several stacks (the 2 original nextjs-* guides) **does use** it, to prevent misfires | ≤450 characters (of the description value, excluding the `name:` line) |
 | 2 | `## Quick Start` — 2 task-level checklists | The checklist names (New Component / New Route Handler, etc.) and their items are derived from the stack | 6~9 items each |
 | 3 | `## Architecture Overview` | The stack's components and responsibility boundaries | ≤30 lines |
 | 4 | `## Directory Structure` | The conventional layout for that stack (if the project has a real structure, that takes priority) | ≤30 lines |
@@ -72,7 +82,7 @@ Each pack or generated guide has one card per axis (`guides/<axis>/<pack>/RULES.
   has fewer infrastructure concerns and converges on 6~7 files, while a self-built combination lands at 8~10 files.
   **The frontend-guide file count is independent of the backend type** — UI concerns (routing · styling · state · performance ·
   types) do not shrink because the backend is a BaaS
-- Each file ≤300 lines. Over that, a TOC at the top of the file
+- Each file ≤300 lines. **Over 100 lines, a `## Contents` at the top of the file** — so the whole scope is visible even when only part is read (the official standard)
 - File names are task-centred (`api-endpoints.md`, `database-patterns.md`) — no listing of technology names.
   **A slot the seam fills uses the axis pack's `seamSlots` name verbatim, without exception** — if the names diverge here,
   it breaks the moment a consumer looks a file up by its slot (guide-gate compares them)

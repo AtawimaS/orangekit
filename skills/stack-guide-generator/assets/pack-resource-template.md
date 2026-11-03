@@ -3,6 +3,19 @@
 **This is the only document an L1 authoring agent reads in order to match the format.** It was extracted once from the 5 existing packs
 (`nextjs` · `react-vite` · `vue` · `supabase` · `aws-container`).
 
+## Contents
+
+- 1. File header
+- 2. Section skeleton
+- 3. The two misuse-list formats
+- 4. Marking good and bad examples — this is a convention the gate reads
+- 5. Marking code files — this is the input to execution verification
+- 6. Density and budget
+- 7. Tone
+- 7-B. No circular verification — when "run confirmed" is not verification
+- 7-C. If you carry a test, prove that it blocks
+- 8. Security primitives are the exception here
+
 > **Do not open another pack or guide.** The old spec put up the firewall "reference the format only, never copy content"
 > as an instruction, and **it failed under measurement (2026-08-23)** — a broken `safeReturnTo` was copied verbatim
 > from the react-vite pack into the vue pack, and the same defect was in all four shipped

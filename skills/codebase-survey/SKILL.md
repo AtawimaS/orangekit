@@ -1,6 +1,6 @@
 ---
 name: codebase-survey
-description: Measures an existing repository's stack, structure, and architecture, updates the project-owned rule cards (project-structure, code-conventions), and reports drift. Use when the harness was installed into an existing project after the fact, or when the code has grown and the cards have gone stale. Creating CLAUDE.md for the first time is the built-in /init and choosing a stack is /orangekit-init — this skill updates cards that already exist to match what is actually there.
+description: Measures an existing repository's stack, directory structure, architecture, and conventions, updates the project rule cards (project-structure, code-conventions) to match reality, and reports where they drifted. Use when this harness was installed into an existing project after the fact, or when the code has grown and the structure description no longer matches. Creating CLAUDE.md for the first time is /init; rule files for a stack without a pack are /stack-guide-generator.
 ---
 
 # Codebase Survey
@@ -15,6 +15,17 @@ quietly become false, and a false card is worse than no card. This skill is that
 > `/stack-guide-generator`, measuring *this change's* impact radius is `orangekit-planner`,
 > and checking whether build and test *run* is `/health-check`. This skill owns what none of those four cover:
 > **the current facts of the whole repository**. It does not fix code and does not change structure.
+
+Copy this checklist into your response to show progress:
+
+```
+- [ ] 0 Harness inventory (read only)
+- [ ] 1 Measure
+- [ ] 2 Describe the architecture (with path evidence)
+- [ ] 3 Card drift and repoTopology check
+- [ ] 4 Run the verification commands
+- [ ] 5 Report, then confirm with the user
+```
 
 ## Step 0: Project harness inventory — read only
 

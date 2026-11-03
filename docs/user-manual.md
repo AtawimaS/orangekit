@@ -196,7 +196,7 @@ before adopting it, and rebuts wrong findings with grounds.
 | output of the built-in `/code-review` | hand it to `/receiving-code-review` |
 | a report from `orangekit-reviewer` | ditto |
 | review comments from a person | ditto |
-| an external AI cross-check is needed | `/codex-claude-loop` — **source is sent to an external model, so it does not run without consent**. Authentication is `codex login` (ChatGPT account or API key) — the key is not kept in an environment variable or a config file |
+| an external AI cross-check is needed | `/codex-cross-check` — **source is sent to an external model, so it does not run without consent**. Authentication is `codex login` (ChatGPT account or API key) — the key is not kept in an environment variable or a config file |
 
 ---
 
@@ -235,7 +235,7 @@ before adopting it, and rebuts wrong findings with grounds.
 | implementation is done and the documents need updating | `/completion-review` |
 | a full security audit (dependencies · secrets · payments) | `/security-review` |
 | handling review feedback | `/receiving-code-review` |
-| cross-checking with an external AI | `/codex-claude-loop` |
+| cross-checking with an external AI | `/codex-cross-check` |
 | opening a PR/MR | `/pr-prep` |
 | reclaiming the shortcuts (`ORANGEKIT-SHORTCUT:`) you left behind | `/shortcut-ledger` |
 

@@ -691,7 +691,7 @@ run_fast() {
       if [ ! -f "$sd/$ref" ] && [ ! -f "$ref" ]; then
         bad "$(basename "$sd") → $ref missing"; sdang=$((sdang+1))
       fi
-    done < <(grep -ohE '(skills/[A-Za-z0-9._-]+/)?(references|assets|resources|scripts)/[A-Za-z0-9._/-]+\.(md|json|csv|txt|py|sh|html|hbs)' "$sd/SKILL.md" 2>/dev/null | sort -u)
+    done < <(grep -ohE '(skills/[A-Za-z0-9._-]+/)?(references|assets|resources|scripts)/[A-Za-z0-9._/-]+\.(md|jsonl|json|csv|tsv|txt|py|sh|html|hbs)' "$sd/SKILL.md" 2>/dev/null | sort -u)
   done < <(skill_dirs)
   [ "$sdang" -eq 0 ] && ok "skill-internal references — all ${schecked} exist"
 
@@ -1568,7 +1568,7 @@ $c"
     # Dangling reference paths. Only ones containing a slash are examined — so that a filename the norms
     # mention as "do not create" (orangekit.config.json and the like) is not mistaken for a requirement that it exist.
     local cdang=0 cchk=0 p
-    for p in $(grep -ohE '(\.?[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+\.(md|sh|json)' CLAUDE.md 2>/dev/null | sort -u); do
+    for p in $(grep -ohE '(\.?[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+\.(md|sh|jsonl|json)' CLAUDE.md 2>/dev/null | sort -u); do
       cchk=$((cchk+1))
       [ -e "$p" ] || { bad "CLAUDE.md → $p missing" "the canonical source the norms point at is gone — a broken reference breaks the norm"; cdang=$((cdang+1)); }
     done

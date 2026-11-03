@@ -2,6 +2,17 @@
 
 Frameworks and templates for service planning, referenced from SKILL.md.
 
+## Contents
+
+- 1. User Story writing guide
+- 2. MoSCoW priority guide
+- 3. How to write Acceptance Criteria
+- 4. Functional requirements table template
+- 5. Non-functional requirements checklist
+- 6. Information architecture guide
+- 7. Service plan output template
+
+
 ---
 
 ## 1. User Story writing guide

@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: Technically verifies received code-review feedback and handles it by severity. Use when you receive built-in /code-review results, an orangekit-reviewer report, external AI cross-verification (codex) results, or an external review the user pasted in. It does not accept feedback blindly — it confirms each point against the actual code before adopting it, and rebuts incorrect points with evidence.
+description: Verifies received code-review feedback (a teammate's comments, /code-review output, an orangekit-reviewer report, findings from an external AI such as Codex) against the actual code, one point at a time, and handles each as adopt, rebut, or defer. Use when review comments have arrived, when the user asks "is this finding right?", or wants to pick only the feedback worth applying. For finding bugs in a change that has not been reviewed yet use /code-review.
 ---
 
 # Receiving Code Review
@@ -9,10 +9,17 @@ Technically verify code-review feedback and handle each item appropriately by se
 
 ## Core principles
 
-- **Verification first**: do not accept feedback blindly. Check the actual code to verify that it is correct.
-- **Technical rigor**: technical judgement comes before social agreement ("great catch!").
-- **Evidence-based rebuttal**: when the reviewer is wrong, rebut with concrete evidence.
-- **YAGNI check**: verify that a "professional-looking" suggestion is actually needed.
+Adopt feedback only **after opening the actual code to check it** — a reviewer can also be wrong without the full context.
+Rebut incorrect points with evidence, and test "professional-looking" suggestions for necessity with YAGNI.
+
+Copy this checklist into your reply and tick it off as you go:
+
+```
+- [ ] Step 1 Confirm the source and pick the path
+- [ ] Step 2 Fact-check each point (file:line)
+- [ ] Step 3 Handle by severity
+- [ ] Step 4 Summarize the outcome (through Step 5 on the Sonar path)
+```
 
 ## Forbidden response patterns
 
@@ -35,7 +42,7 @@ Use these instead:
 | Source | Path to run |
 |------|----------|
 | Built-in `/code-review` or `orangekit-reviewer` results | Step 2 → Step 3 → Step 4 |
-| External AI cross-verification (`codex-claude-loop`) results | Step 2 → Step 3 → Step 4 |
+| External AI cross-verification (`codex-cross-check`) results | Step 2 → Step 3 → Step 4 |
 | An external review the user pasted in | Step 2 (source trust is low, so verify harder) → Step 3 → Step 4 |
 | Static analyzer (SonarQube) issues — `health-check` Step 5.6 | Step 2 (**verify harder**) → Step 3 → Step 4 → Step 5 |
 
@@ -171,7 +178,7 @@ Checked, and [the finding] is correct. [verification evidence]. Fixing it.
 
 ## Reference documents
 
-Consult these when you need a standard for judging whether feedback is warranted. **If they are absent, skip the reference.**
+There are no bundled files. Read the rules below when you need a standard for judging whether feedback is warranted. **If they are absent, skip them.**
 
 - Code change norms: `.claude/rules/code-change.md`
 - Reversibility class decisions: `.claude/rules/reversibility.md`

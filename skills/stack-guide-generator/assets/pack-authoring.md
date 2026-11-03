@@ -4,6 +4,20 @@ This is the **canonical source for Step 2-A** of `stack-guide-generator`. Read i
 this path does not run in a consumer project, so it was split out of `SKILL.md` (there is no reason to keep 133 maintainer-only
 lines in a file that loads on every trigger).
 
+## Contents
+
+- L0 — freezing the contract (main session, serial, once)
+- Dividing into clusters — the fan-out unit is not the file
+- The pilot wave — fan out only after verifying L0 for real
+- L1 — resource authoring (parallel by cluster)
+- L2 — hub fragments (parallel with L1)
+- L3 — fan-in (main session, serial)
+- Pack pipelining — write the next pack's L0 during the main session's waiting time
+- Rollback — by measurement, not by impression
+- When bringing in a new toolchain, assume the harness knows only one language
+- Once you have fixed the harness, run the regression against the shipped assets
+- Criteria for prebuilding seams
+
 `dev/docs/skill-review/` is the canonical source for measured evidence. Only the rules live here.
 
 This is the path for creating a missing axis pack. **Without this section the vue pack authoring became improvisation and took
@@ -285,3 +299,28 @@ raise `wireContractSince` to that edition too (the installer's contract pinning 
 
 > **A prerelease is not the latest.** Some packages have an rc on the `latest` tag (prisma 8.0.0-rc) —
 > `guide-freshness.sh` falls back to the highest stable release for its verdict. Do not raise a pack to follow an rc.
+
+## Criteria for prebuilding seams
+
+**The normal path for a seam is runtime generation.** Lowering the prebuild unit from combinations (32) to axes (13)
+was the point of v3.12.0, and prebuilding seams per combination as well amounts to reversing that
+decision. Generate **once** per combination and put it in the cache with `install-guide.sh --save-seam`, and
+from the second project on the same combination there is no generation at all.
+
+**The criterion for prebuilding anyway** is not speed but the audit-and-repair loop — not making every user
+repeat the loop the maintainer went through once. Ship only when **all** of the following hold:
+ⓐ a combination judged to be used often ⓑ the maintainer finished the audit and repairs to the end
+ⓒ **it is included in the seam regression of `--self-test`** — if it is not re-verified automatically every time
+a pack is fixed, a prebuilt seam becomes a source of drift.
+Currently shipped: `nextjs+supabase` · `react-vite+aws-container` (since v3.35.0 **backend only** — the frontend is the react-vite pack hub) · `vue+node-api`.
+
+**Pack hubs replace seams (v3.35.0).** A pack that follows the standard wire contract (`guides/contracts/`) carries the API client,
+complete example and endpoints inside the pack, carries auth as `variants/auth/<method>/`, and carries its hub as `HUB.md`.
+When the other axis is on the same contract too, that combination completes with no seam. Currently: `react-vite` · `fastify` · `react-native`.
+The more of the remaining HTTP packs move to this shape, the more combination seams are left only for real combination dependencies such as BaaS and hybrid shells.
+
+**The cache tells you the promotion candidates.** The same combination piling up in `~/.claude/orangekit/seam-cache/`
+is itself the evidence of frequency — the maintainer picks from that list. Instead of prebuilding 28 combinations,
+promote **only what demand has proven**. Promotion procedure: move the cached copy into `guides/seams/<combination>/`
+→ put it through the three audits → fold it into the seam regression of `--regress`. Miss the last step
+and that seam silently diverges every time a pack is fixed.

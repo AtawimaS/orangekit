@@ -1,6 +1,6 @@
 ---
 name: harness-evaluation
-description: Runs a full path-level evaluation of the harness (graph) engine across 8 axes and produces a severity-ranked defect list, a per-area summary, and an uncertainty map. Use when the user asks for a "harness evaluation", "graph evaluation", "full evaluation", "harness check", or "exhaustive inspection"; manual invocation only. Fact measurement is done by doctor, so this skill takes that output as input and only judges, confirming Critical findings solely by isolated reproduction.
+description: Runs a full path-level evaluation of the harness (graph) engine across 8 axes and produces a severity-ranked defect list, a per-area summary, and an uncertainty map. Takes doctor, skill-lint and routing-eval output as its fact input and only judges, confirming Critical findings solely by isolated reproduction. Use when the user asks for a "harness evaluation", "graph evaluation", "full evaluation", "harness check", or "exhaustive inspection". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -21,7 +21,7 @@ The mapping between a request's perspective and an axis is held in the ledger `r
 | axis | question | machine verdict (Step 1) | model judgement (Step 2) |
 | --- | --- | --- | --- |
 | **P1 routing and canonical-source consistency** | do two places claim the same fact differently — **routing card ↔ graph ↔ hbs ↔ T0, all four** | S/M/L grep (the vulnerability severity table is a false positive, so it is excluded) · `--graph` G6·G9 Phase both ways · `--fast`'s "declaration ↔ reality" (counts · names · tool lists · T0 budget) · `shared-copy` · version stamps | does the violation actually cause misbehavior · closure of the 6 document-dependency edges · the 4 axes of reference freshness · does the copy carry a canonical-source marker |
-| **P2 firing accuracy** | ①does it fire when the condition holds ②is the node's permission shape right ③does it catch what it must ④does it leave alone what it must ⑤**are the exemption and bypass paths closed** | comparison against the graph declaration · G8 manual↔frontmatter · agent frontmatter · `--self-test` positive/benign/**bypass-attempt** fixtures · "blocking reason ↔ fixture" | is manual the intent or an omission · gate misses · sufficiency of handoff restoration · does the verification base a gate presumes actually exist · false-positive history (`--lessons` per guard) |
+| **P2 firing accuracy** | ①does it fire when the condition holds ②is the node's permission shape right ③does it catch what it must ④does it leave alone what it must ⑤**are the exemption and bypass paths closed** | comparison against the graph declaration · G8 manual↔frontmatter · agent frontmatter · `skill-lint.sh` · `routing-eval.sh` (mis-calls between neighboring descriptions) · `--self-test` positive/benign/**bypass-attempt** fixtures · "blocking reason ↔ fixture" | is manual the intent or an omission · gate misses · sufficiency of handoff restoration · does the verification base a gate presumes actually exist · false-positive history (`--lessons` per guard) |
 | **P3 loop termination** | does a repeating node have a ceiling and a termination predicate | grep for ceilings — including references/ | is the ceiling appropriate to the nature of the work |
 | **P4 feedback closure** | does a record come back as an asset diff | `--lessons` promotion/narrowing candidates + archive count · `--graph` G7 store consumption paths · the `eval-report → lessons` edge | is the chosen promotion form (hook/skill/rule) right · **does narrowing happen** · was it physically moved into the archive |
 | **P5 path cost** | are the node and gate counts for one representative task, and the **resident · on-invocation · conditional** costs, appropriate | `--usage` (resident bytes · graph.log · skilluse.log) · `--inventory` (SKILL lines · on-invocation bytes · card `paths:` width) | excess gates on the Reversible path · resident budget allocation · does a wide `paths:` drag a large card into unrelated edits · SKILL.md files over 300 lines |
@@ -87,6 +87,14 @@ bash "$R/skills/stack-guide-generator/scripts/pack-smoke.sh" --self-test
 # Putting it off makes the user pay the same refresh separately on every consumer init (measured 2026-10: all 14 packs bumped)
 for p in "$R"/guides/frontend/*/ "$R"/guides/backend/*/ "$R"/guides/app/*/; do
   bash "$R/scripts/guide-freshness.sh" --pack "$p" >/dev/null 2>&1 || echo "needs refresh: ${p#"$R"/}"
+done
+# P2 — skill authoring standard (the machine-judgeable part of the official best practices) and description routing accuracy
+bash "$R/skills/skill-enhancer/scripts/skill-lint.sh" "$R"/skills/*/ "$R"/marketing/skills/*/ "$R"/harness/skills/*/
+# Routing costs `claude -p` calls — run it only when a SKILL.md description changed since the last report.
+# assets/routing-cases-easy.jsonl (direct utterances, for regression detection) · assets/routing-cases-hard.jsonl (indirect utterances with no keywords, for measuring improvement).
+# The competing built-in list is assets/routing-competitors.tsv — update it together when a built-in description changes
+for s in easy hard; do
+  bash "${CLAUDE_SKILL_DIR}/scripts/routing-eval.sh" --cases "${CLAUDE_SKILL_DIR}/assets/routing-cases-$s.jsonl" --runs 2
 done
 # P1 — routing vocabulary (read it excluding the severity-table context)
 grep -rn 'Small\|Medium\|Large' "$R"/skills/*/SKILL.md

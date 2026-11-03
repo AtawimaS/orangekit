@@ -1,0 +1,146 @@
+{"id": "brainstorming-1", "query": "I want to add a notification feature, but I can't tell yet whether to go with push or in-app. Let's talk it through.", "expect": ["brainstorming"], "kind": "pos"}
+{"id": "brainstorming-2", "query": "I haven't decided how to build this. Lay out the options for me: cache on the server or on the client?", "expect": ["brainstorming"], "kind": "pos"}
+{"id": "brainstorming-3", "query": "I want to turn my idea for a subscription-churn-prevention feature into a concrete design. Work it out with me by asking questions.", "expect": ["brainstorming"], "kind": "pos"}
+{"id": "brainstorming-4", "query": "I have a vague idea for a team activity feed but no clear design yet — let's brainstorm approaches before I code anything.", "expect": ["brainstorming"], "kind": "pos"}
+{"id": "brainstorming-5", "query": "I'm adding social login buttons to the login page. It's already decided: Google and Kakao. Refine my request to fit the project structure.", "expect": ["prompt-enhancer"], "kind": "near"}
+{"id": "brainstorming-6", "query": "Should the payment module stay in the monolith or be split out? Analyze it in parallel from the technical, business and UX perspectives and give me one recommendation.", "expect": ["council-review"], "kind": "near"}
+{"id": "prompt-enhancer-1", "query": "Add a date filter to the orders list. Look at our project conventions and existing patterns, flesh out the request, and go ahead.", "expect": ["prompt-enhancer"], "kind": "pos"}
+{"id": "prompt-enhancer-2", "query": "\"Add CSV export to the admin page\" -- that's all I wrote. Figure out the code structure, fill in the missing context, and do it.", "expect": ["prompt-enhancer"], "kind": "pos"}
+{"id": "prompt-enhancer-3", "query": "I know exactly what to build: an account-deletion API. But my description is short, so I'd like you to enrich the prompt with the repo's context.", "expect": ["prompt-enhancer"], "kind": "pos"}
+{"id": "prompt-enhancer-4", "query": "Make my short request \"add rate limiting to the upload endpoint\" richer using this repo's stack and conventions before you start.", "expect": ["prompt-enhancer"], "kind": "pos"}
+{"id": "prompt-enhancer-5", "query": "I want to add something like a recommendation feature, but I don't know what or how. Let's work out the direction first.", "expect": ["brainstorming"], "kind": "near"}
+{"id": "business-planner-1", "query": "Before I wire up payments, I'm not sure this will actually make money. Work it out from a business standpoint.", "expect": ["business-planner"], "kind": "pos"}
+{"id": "business-planner-2", "query": "Could we run this feature as a paid one? I want to see who should pay how much for it to be worth it.", "expect": ["business-planner"], "kind": "pos"}
+{"id": "business-planner-3", "query": "Write a business plan for the new service, including the revenue model and the market-entry strategy.", "expect": ["business-planner"], "kind": "pos"}
+{"id": "business-planner-4", "query": "Can you assess the business viability and monetization model of this marketplace idea and write a business plan?", "expect": ["business-planner"], "kind": "pos"}
+{"id": "business-planner-5", "query": "Search the web for how three competitors in this market charge for pricing, and write it up as a document.", "expect": ["research"], "kind": "near"}
+{"id": "business-planner-6", "query": "Whether to pivot our business direction is a hard-to-reverse decision. Weigh it from the technical, business and UX perspectives.", "expect": ["council-review"], "kind": "near"}
+{"id": "research-1", "query": "Search the web for how competing apps structure their onboarding and summarize it.", "expect": ["research"], "kind": "pos"}
+{"id": "research-2", "query": "Check the latest on Stripe and Toss Payments fee structures and settlement cycles, and leave it as a document.", "expect": ["research"], "kind": "pos"}
+{"id": "research-3", "query": "Dig around online and tell me whether this library is still maintained and what the alternatives are.", "expect": ["research"], "kind": "pos"}
+{"id": "research-4", "query": "Do a web research on how other SaaS tools handle usage-based billing and write it up in a structured doc.", "expect": ["research"], "kind": "pos"}
+{"id": "research-5", "query": "Review the business viability of this idea, including the revenue model and the market-entry strategy.", "expect": ["business-planner"], "kind": "near"}
+{"id": "research-6", "query": "I want to optimize the keywords and structure of my blog post so it ranks well in Google search.", "expect": ["seo-strategy"], "kind": "near"}
+{"id": "council-review-1", "query": "Moving from Postgres to DynamoDB is hard to reverse. Review it from several perspectives at once.", "expect": ["council-review"], "kind": "pos"}
+{"id": "council-review-2", "query": "Run a council review. It's about the microservices migration.", "expect": ["council-review"], "kind": "pos"}
+{"id": "council-review-3", "query": "Look at this direction from three angles: is it technically right, right for the business, and fine for users? Give me one final opinion.", "expect": ["council-review"], "kind": "pos"}
+{"id": "council-review-4", "query": "We need a multi-perspective analysis (tech, business, UX) before committing to this architecture. Give one integrated recommendation.", "expect": ["council-review"], "kind": "pos"}
+{"id": "council-review-5", "query": "I have a few ideas for a new onboarding flow. Let's brainstorm some together.", "expect": ["brainstorming"], "kind": "near"}
+{"id": "service-planner-1", "query": "Design the screen layout and user flow for the new reservation feature.", "expect": ["service-planner"], "kind": "pos"}
+{"id": "service-planner-2", "query": "I can't pin down what happens with the refund when a reservation is cancelled, or which screens the user sees. Pull out the requirements.", "expect": ["service-planner"], "kind": "pos"}
+{"id": "service-planner-3", "query": "Derive the functional requirements: what features should this service consist of?", "expect": ["service-planner"], "kind": "pos"}
+{"id": "service-planner-4", "query": "Help me derive functional requirements and map the user flows for the new onboarding feature.", "expect": ["service-planner"], "kind": "pos"}
+{"id": "service-planner-5", "query": "Write the PRD document for this feature. There isn't one in dev/docs/prd yet.", "expect": ["prd-generator"], "kind": "near"}
+{"id": "service-planner-6", "query": "Pick the screen colors and font pairing and build a design system.", "expect": ["ui-ux-design"], "kind": "near"}
+{"id": "prd-generator-1", "query": "Write the PRD for the payment-method management feature.", "expect": ["prd-generator"], "kind": "pos"}
+{"id": "prd-generator-2", "query": "The requirements are settled, so turn them into a product requirements document. Split it up if it's large.", "expect": ["prd-generator"], "kind": "pos"}
+{"id": "prd-generator-3", "query": "Before development starts, I want to pin this feature's spec down in a document. There are no documents at all yet.", "expect": ["prd-generator"], "kind": "pos"}
+{"id": "prd-generator-4", "query": "Write a PRD for the notification center feature; split into modular PRDs if the scope is large.", "expect": ["prd-generator"], "kind": "pos"}
+{"id": "prd-generator-5", "query": "The PRD already exists. Check its quality and find where it doesn't match the implementation.", "expect": ["prd-reviewer"], "kind": "near"}
+{"id": "prd-generator-6", "query": "The PRD is done. Now create the plan and tasks dev documents.", "expect": ["dev-docs-generator"], "kind": "near"}
+{"id": "prd-reviewer-1", "query": "Review the PRD I just edited. Also check whether anything contradicts itself.", "expect": ["prd-reviewer"], "kind": "pos"}
+{"id": "prd-reviewer-2", "query": "Read this PRD and find the ambiguous requirements a developer might misread.", "expect": ["prd-reviewer"], "kind": "pos"}
+{"id": "prd-reviewer-3", "query": "Compare what the PRD says against the actual code, find where they diverge, and give me a report on what to fix.", "expect": ["prd-reviewer"], "kind": "pos"}
+{"id": "prd-reviewer-4", "query": "Please audit the existing PRD for clarity, internal consistency, and alignment with the implementation.", "expect": ["prd-reviewer"], "kind": "pos"}
+{"id": "prd-reviewer-5", "query": "There's no PRD for this feature. Write a new one.", "expect": ["prd-generator"], "kind": "near"}
+{"id": "dev-docs-generator-1", "query": "The PRD is finished, so create the implementation plan and task-list documents.", "expect": ["dev-docs-generator"], "kind": "pos"}
+{"id": "dev-docs-generator-2", "query": "Before starting this refactoring, let's create the plan, context and tasks document set.", "expect": ["dev-docs-generator"], "kind": "pos"}
+{"id": "dev-docs-generator-3", "query": "Before we implement, break the work into a checklist of steps and leave it under dev/active.", "expect": ["dev-docs-generator"], "kind": "pos"}
+{"id": "dev-docs-generator-4", "query": "Generate the implementation plan, context and task docs for this feature now that the PRD is approved.", "expect": ["dev-docs-generator"], "kind": "pos"}
+{"id": "dev-docs-generator-5", "query": "Implementation is done. Update context.md, check off the tasks, and archive what's finished.", "expect": ["completion-review"], "kind": "near"}
+{"id": "completion-review-1", "query": "Implementation is done. Wrap up the documentation side: reflect progress and tidy the finished work.", "expect": ["completion-review"], "kind": "pos"}
+{"id": "completion-review-2", "query": "The code is all written, so tick off tasks.md and update the related API docs to match the current code.", "expect": ["completion-review"], "kind": "pos"}
+{"id": "completion-review-3", "query": "The work is done, and the leftover docs in dev/active need to be tidied up and archived.", "expect": ["completion-review"], "kind": "pos"}
+{"id": "completion-review-4", "query": "Implementation is done; update context.md, tick off tasks.md and archive the finished work docs.", "expect": ["completion-review"], "kind": "pos"}
+{"id": "completion-review-5", "query": "Write the body so this change can go up as a PR. Include the rollback method too.", "expect": ["pr-prep"], "kind": "near"}
+{"id": "pr-prep-1", "query": "Prepare the PR.", "expect": ["pr-prep"], "kind": "pos"}
+{"id": "pr-prep-2", "query": "I'm about to push this branch, so run the checks and write the PR body too. Include things like the rollback procedure if needed.", "expect": ["pr-prep"], "kind": "pos"}
+{"id": "pr-prep-3", "query": "Before I hand this to the reviewer, write the MR description with a change summary, the blast radius, and how to revert.", "expect": ["pr-prep"], "kind": "pos"}
+{"id": "pr-prep-4", "query": "Get this branch ready for a pull request — collect the diff, run the checks and draft the PR description.", "expect": ["pr-prep"], "kind": "pos"}
+{"id": "pr-prep-5", "query": "Review the current diff for bugs.", "expect": ["builtin:code-review"], "kind": "near"}
+{"id": "pr-prep-6", "query": "Implementation is done, so update the wrap-up docs: context.md and tasks.md.", "expect": ["completion-review"], "kind": "near"}
+{"id": "receiving-code-review-1", "query": "I got about ten comments from the reviewer. Check each against the code to see whether the point is valid, and handle them one by one.", "expect": ["receiving-code-review"], "kind": "pos"}
+{"id": "receiving-code-review-2", "query": "Codex says this function has a race condition. Check whether that's really true, and rebut it if not.", "expect": ["receiving-code-review"], "kind": "pos"}
+{"id": "receiving-code-review-3", "query": "I'll paste the feedback a colleague left on my PR. Don't just follow it blindly -- let's apply only what's valid.", "expect": ["receiving-code-review"], "kind": "pos"}
+{"id": "receiving-code-review-4", "query": "I got this external review feedback on my change; verify each point against the code and tell me which to adopt.", "expect": ["receiving-code-review"], "kind": "pos"}
+{"id": "receiving-code-review-5", "query": "Review my current changes. Check whether there are bugs.", "expect": ["builtin:code-review"], "kind": "near"}
+{"id": "receiving-code-review-6", "query": "Have Codex independently cross-verify this code.", "expect": ["codex-cross-check"], "kind": "near"}
+{"id": "codex-cross-check-1", "query": "Cross-check this payment logic with Codex. Sending the source outside is fine.", "expect": ["codex-cross-check"], "kind": "pos"}
+{"id": "codex-cross-check-2", "query": "I'd like one more look through another AI's eyes. Run an independent verification with an OpenAI model.", "expect": ["codex-cross-check"], "kind": "pos"}
+{"id": "codex-cross-check-3", "query": "Check the quality of this migration code with a loop where Claude and Codex review it in turns.", "expect": ["codex-cross-check"], "kind": "pos"}
+{"id": "codex-cross-check-4", "query": "Run a dual-AI cross-check with Codex on this auth refactor; I consent to sending the source.", "expect": ["codex-cross-check"], "kind": "pos"}
+{"id": "codex-cross-check-5", "query": "Quickly review just the bugs in the current diff.", "expect": ["builtin:code-review"], "kind": "near"}
+{"id": "security-review-1", "query": "Do a security check of the entire codebase before we deploy.", "expect": ["security-review"], "kind": "pos"}
+{"id": "security-review-2", "query": "Do an exhaustive sweep of our dependencies for known CVEs and any hardcoded secrets left behind.", "expect": ["security-review"], "kind": "pos"}
+{"id": "security-review-3", "query": "Give me an overall audit report on whether the parts that handle payments and personal data are safe.", "expect": ["security-review"], "kind": "pos"}
+{"id": "security-review-4", "query": "Run a full security audit of the whole repo, including dependency vulnerabilities and leaked secrets.", "expect": ["security-review"], "kind": "pos"}
+{"id": "security-review-5", "query": "Just check whether the things I changed on this branch introduced any new vulnerabilities.", "expect": ["builtin:security-review"], "kind": "near"}
+{"id": "security-review-6", "query": "Check whether this PR's changes have any security issues.", "expect": ["builtin:security-review"], "kind": "near"}
+{"id": "codebase-survey-1", "query": "I installed this harness into an existing project late. Measure the actual structure and update the rule cards if they don't match.", "expect": ["codebase-survey"], "kind": "pos"}
+{"id": "codebase-survey-2", "query": "The code has grown a lot, so the project-structure card is probably stale. Check for drift against what's actually there now.", "expect": ["codebase-survey"], "kind": "pos"}
+{"id": "codebase-survey-3", "query": "Measure what stack this repo uses and what conventions it follows, and reflect that in the project rules.", "expect": ["codebase-survey"], "kind": "pos"}
+{"id": "codebase-survey-4", "query": "Survey this existing repo and refresh the project-structure and code-conventions rule cards to match reality.", "expect": ["codebase-survey"], "kind": "pos"}
+{"id": "codebase-survey-5", "query": "This project has no CLAUDE.md. Create one from scratch.", "expect": ["init"], "kind": "near"}
+{"id": "codebase-survey-6", "query": "It's a Rust project and there's no stack rules file. Create one based on the official docs.", "expect": ["stack-guide-generator"], "kind": "near"}
+{"id": "stack-guide-generator-1", "query": "We use Flutter and there's no stack rules file. Read the official docs and create one.", "expect": ["stack-guide-generator"], "kind": "pos"}
+{"id": "stack-guide-generator-2", "query": "Generate a frontend guide skill for SvelteKit in the project.", "expect": ["stack-guide-generator"], "kind": "pos"}
+{"id": "stack-guide-generator-3", "query": "I switched our tech stack to Go and need a stack guide that fits it.", "expect": ["stack-guide-generator"], "kind": "pos"}
+{"id": "stack-guide-generator-4", "query": "Generate a stack rules file for our Rust backend based on the official docs.", "expect": ["stack-guide-generator"], "kind": "pos"}
+{"id": "stack-guide-generator-5", "query": "Look at the existing code and update the code-conventions card to match reality.", "expect": ["codebase-survey"], "kind": "near"}
+{"id": "stack-guide-generator-6", "query": "Initialize CLAUDE.md.", "expect": ["init"], "kind": "near"}
+{"id": "test-driven-development-1", "query": "I'm adding a rule to the discount calculation that coupons can't be stacked. Let's write the test first and then implement.", "expect": ["test-driven-development"], "kind": "pos"}
+{"id": "test-driven-development-2", "query": "When you build the new feature, start by writing a failing test and then make it pass with the minimum code.", "expect": ["test-driven-development"], "kind": "pos"}
+{"id": "test-driven-development-3", "query": "I need to add refund-policy behavior to this service class. Let's decide together where the test goes first, and go red-green.", "expect": ["test-driven-development"], "kind": "pos"}
+{"id": "test-driven-development-4", "query": "Let's add the invite-expiry behavior with TDD: red, green, refactor.", "expect": ["test-driven-development"], "kind": "pos"}
+{"id": "test-driven-development-5", "query": "There's a null pointer error on login that I think is a one-line fix. Fix it.", "expect": ["none"], "kind": "near"}
+{"id": "test-driven-development-6", "query": "This code is too long. Reduce the duplication and tidy it up.", "expect": ["simplify"], "kind": "near"}
+{"id": "ui-ux-design-1", "query": "I'm building a landing page. Recommend a color palette and font pairing that fits a fintech feel.", "expect": ["ui-ux-design"], "kind": "pos"}
+{"id": "ui-ux-design-2", "query": "I want the dashboard layout and component styles to stay consistent. Set up a design system.", "expect": ["ui-ux-design"], "kind": "pos"}
+{"id": "ui-ux-design-3", "query": "This screen looks too plain, and I don't know what style would make it look polished.", "expect": ["ui-ux-design"], "kind": "pos"}
+{"id": "ui-ux-design-4", "query": "Create a design system for our healthcare dashboard — style, color palette, typography and chart types.", "expect": ["ui-ux-design"], "kind": "pos"}
+{"id": "ui-ux-design-5", "query": "Make me a background illustration image for the hero area.", "expect": ["image-generator"], "kind": "near"}
+{"id": "ui-ux-design-6", "query": "Draw the system architecture of the service as a picture.", "expect": ["diagram-design"], "kind": "near"}
+{"id": "image-generator-1", "query": "Make an app icon. An orange tangerine shape, minimal style.", "expect": ["image-generator"], "kind": "pos"}
+{"id": "image-generator-2", "query": "I need a blog OG image. Pull one thumbnail with the title on it.", "expect": ["image-generator"], "kind": "pos"}
+{"id": "image-generator-3", "query": "I need an illustration for the landing hero but I can't draw it myself. Can you make one?", "expect": ["image-generator"], "kind": "pos"}
+{"id": "image-generator-4", "query": "Generate a mockup image of our app on a phone for the website header.", "expect": ["image-generator"], "kind": "pos"}
+{"id": "image-generator-5", "query": "Draw the order-processing flow as a sequence diagram.", "expect": ["diagram-design"], "kind": "near"}
+{"id": "image-generator-6", "query": "Define the service's color and typography guidelines.", "expect": ["ui-ux-design"], "kind": "near"}
+{"id": "shortcut-ledger-1", "query": "Before the release, check whether the temporary shortcuts I deliberately left in the code have now hit their limits.", "expect": ["shortcut-ledger"], "kind": "pos"}
+{"id": "shortcut-ledger-2", "query": "The parts I first patched with hardcoding -- traffic has grown, so decide which debts need paying back now.", "expect": ["shortcut-ledger"], "kind": "pos"}
+{"id": "shortcut-ledger-3", "query": "Gather every ORANGEKIT-SHORTCUT marker and re-assess whether each is still valid.", "expect": ["shortcut-ledger"], "kind": "pos"}
+{"id": "shortcut-ledger-4", "query": "Harvest the deliberate shortcut markers in the code and tell me which ones to reclaim now that scale has grown.", "expect": ["shortcut-ledger"], "kind": "pos"}
+{"id": "shortcut-ledger-5", "query": "The code I just wrote is too verbose. Reuse what can be reused and simplify it.", "expect": ["simplify"], "kind": "near"}
+{"id": "skill-enhancer-1", "query": "Harden the skill I just made with skill-creator up to harness grade.", "expect": ["skill-enhancer"], "kind": "pos"}
+{"id": "skill-enhancer-2", "query": "My skill has fuzzy boundaries and no handling for failure. Strengthen it with a contract and machine verification.", "expect": ["skill-enhancer"], "kind": "pos"}
+{"id": "skill-enhancer-3", "query": "First decide whether to keep this skill, split it, merge it with another, or delete it, and then reinforce only what's needed.", "expect": ["skill-enhancer"], "kind": "pos"}
+{"id": "skill-enhancer-4", "query": "Harden this existing skill: decide keep/split/merge/delete first, then add boundary declarations and failure paths.", "expect": ["skill-enhancer"], "kind": "pos"}
+{"id": "skill-enhancer-5", "query": "Create a new skill, run an eval, and optimize the trigger description.", "expect": ["skill-creator"], "kind": "near"}
+{"id": "skill-enhancer-6", "query": "My skill description doesn't trigger well. Run a trigger-accuracy benchmark and improve it.", "expect": ["skill-creator"], "kind": "near"}
+{"id": "scroll-stop-builder-1", "query": "Build an Apple-style website where scrolling steps through the frames of a product video.", "expect": ["scroll-stop-builder"], "kind": "pos"}
+{"id": "scroll-stop-builder-2", "query": "I want to extract frames from this mp4 and build a landing page where a canvas is tied to scroll.", "expect": ["scroll-stop-builder"], "kind": "pos"}
+{"id": "scroll-stop-builder-3", "query": "Implement in code a video page where the product comes apart as much as you scroll down. I already have the video.", "expect": ["scroll-stop-builder"], "kind": "pos"}
+{"id": "scroll-stop-builder-4", "query": "Turn my product video into a scroll-driven canvas frame animation site.", "expect": ["scroll-stop-builder"], "kind": "pos"}
+{"id": "scroll-stop-builder-5", "query": "Before I make the scroll-stop video, pull out the three kinds of AI video and image prompts I'll need.", "expect": ["scroll-stop-prompter"], "kind": "near"}
+{"id": "scroll-stop-prompter-1", "query": "Make a set of AI image and video prompts for scroll-stop content.", "expect": ["scroll-stop-prompter"], "kind": "pos"}
+{"id": "scroll-stop-prompter-2", "query": "I want to generate a clip of our product being assembled with a video model. Write the prompts for it.", "expect": ["scroll-stop-prompter"], "kind": "pos"}
+{"id": "scroll-stop-prompter-3", "query": "I don't have the video yet. I first need prompts to make the source video for a scroll animation.", "expect": ["scroll-stop-prompter"], "kind": "pos"}
+{"id": "scroll-stop-prompter-4", "query": "Write the image and video prompts for a scroll-stop product reveal, with an HTML preview page.", "expect": ["scroll-stop-prompter"], "kind": "pos"}
+{"id": "scroll-stop-prompter-5", "query": "I have the video file. Use it to finish the scroll-animation web page.", "expect": ["scroll-stop-builder"], "kind": "near"}
+{"id": "seo-strategy-1", "query": "Our site isn't showing up in search. Do a full SEO audit.", "expect": ["seo-strategy"], "kind": "pos"}
+{"id": "seo-strategy-2", "query": "Optimize the keywords and meta structure of this blog post so it ranks at the top on Google.", "expect": ["seo-strategy"], "kind": "pos"}
+{"id": "seo-strategy-3", "query": "What do we need to do so our service gets cited in AI search like ChatGPT or Perplexity?", "expect": ["seo-strategy"], "kind": "pos"}
+{"id": "seo-strategy-4", "query": "Audit our site for SEO issues and give me an interactive HTML report.", "expect": ["seo-strategy"], "kind": "pos"}
+{"id": "seo-strategy-5", "query": "Research on the web what positioning competing services use and summarize it.", "expect": ["research"], "kind": "near"}
+{"id": "neg-1", "query": "Rename the getUserData function in utils.ts to fetchUserProfile.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-2", "query": "Explain what this regex does.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-3", "query": "Turn on strict in tsconfig and show me the build errors that come up.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-4", "query": "There's a bug where undefined comes first when sorting an array. Fix it.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-5", "query": "Add a REDIS_URL entry to .env.example.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-6", "query": "Explain why this component renders twice.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-7", "query": "Bump the lodash version in package.json to 4.17.21.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-8", "query": "Just attach one onClick handler so the modal closes when the button is clicked.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-9", "query": "Show the last 5 entries of git log and summarize the last commit message.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-10", "query": "In the Python script, change the date format to YYYY-MM-DD.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-11", "query": "In the Dockerfile, change only the node base image version to 20.", "expect": ["none"], "kind": "neg"}
+{"id": "neg-12", "query": "Explain why this SQL query is slow.", "expect": ["none"], "kind": "neg"}

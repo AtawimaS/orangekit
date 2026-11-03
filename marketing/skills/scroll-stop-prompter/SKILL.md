@@ -1,6 +1,6 @@
 ---
 name: scroll-stop-prompter
-description: Generates 3 kinds of AI image/video prompts (assembled, deconstructed, transition) per target model for turning product photos or footage into scroll-stop content, and emits an HTML preview. Use for "generate AI prompts", "product prompts", "scroll-stop prompts". Called as Stage 1 of marketing-workflow.
+description: Writes 3 kinds of AI image/video prompts (assembled, deconstructed, transition) per target model for turning product photos or footage into scroll-stop content, and emits an HTML preview. Use when the source video does not exist yet, or when the user wants a generation model to produce a scene of the product assembling or coming apart. If a video already exists, use /scroll-stop-builder.
 ---
 
 # Scroll-Stop Prompter
@@ -44,6 +44,9 @@ Save `prompts.md` into the campaign directory.
 
 ## Reference documents
 
-- Detailed prompt guide: [references/prompt-guide.md](references/prompt-guide.md)
-- HTML preview template: [assets/prompt-page-template.html](assets/prompt-page-template.html)
+| File | When to read it |
+| --- | --- |
+| [references/prompt-guide.md](references/prompt-guide.md) | Just before writing the prompts in Step 3 |
+| [assets/prompt-page-template.html](assets/prompt-page-template.html) | When generating the HTML in Step 4 (a reasonable default — adjust it to the prompt content) |
+
 - Pipeline integration: the marketing-workflow skill (calls this as Stage 1)

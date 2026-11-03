@@ -1,6 +1,6 @@
 ---
 name: service-planner
-description: Designs the service structure and derives concrete functional requirements. Use for "service planning", "functional requirements", "screen design", "user flow", "requirements elicitation", and for new features whose screens and flows are not settled yet.
+description: Designs the service structure, screens, and user flows, and derives concrete functional requirements. Use when it is not settled which screens are needed, what path users take, or what they see in exceptions such as cancellation, refund, and errors, and for "service planning" or requirements-elicitation requests. When requirements are done and only the document remains use /prd-generator; for visual style such as color and fonts use /ui-ux-design.
 ---
 
 # Service Planner
@@ -9,11 +9,22 @@ Designs the service and derives **concrete functional requirements (FR-xxx)**.
 It answers "what are we building and how?", aiming for a level of detail a PRD can take over as-is.
 
 <HARD-GATE>
-The functional requirements table (Step 5) must not be passed to the PRD without user approval.
-Always save it only after the user confirms.
+Do not pass the functional requirements table (Step 5) to the PRD before the user approves it — the PRD takes this table as-is, so an error spreads downstream.
+Save it after the user confirms.
 </HARD-GATE>
 
 ## Workflow
+
+Copy this checklist into your reply and tick it off as you go (the Step 1 table decides which Steps are skipped).
+
+```
+- [ ] Step 1 Identify the input
+- [ ] Step 2 Integrate the business plan
+- [ ] Step 3 Personas and scenarios
+- [ ] Step 4 IA design
+- [ ] Step 5 Derive FR/NFR, user confirmation
+- [ ] Step 6 Save and link to the PRD
+```
 
 ### Step 1: Identify the input and set the scope
 
@@ -35,7 +46,9 @@ Read `dev/docs/business/business-plan-<name>.md` and pull out **only what constr
 | Key metrics (KPI) | **Why** the Step 5 acceptance criteria have to be measurable |
 
 If there is no business plan, or the item is empty, **do not fill it in by estimating** — mark that item
-"undecided" and raise it as an open question in Step 5. (User Journey Mapping)
+"undecided" and raise it as an open question in Step 5.
+
+### Step 3: User analysis (User Journey Mapping)
 
 3-1. Define the core personas
 3-2. Derive the main user scenarios
@@ -65,7 +78,7 @@ Save path: `dev/docs/service/service-plan-<name>.md`
 
 ## Reference documents
 
-`references/service-frameworks.md` is 308 lines. **Read only the section for the current Step.**
+`references/service-frameworks.md` is 319 lines. **Read only the section for the current Step.**
 
 | Step | Section to read |
 | --- | --- |
@@ -80,5 +93,5 @@ Save path: `dev/docs/service/service-plan-<name>.md`
 
 - Avoid the trap of mapping FRs 1:1 to UI screens — the screen data needs table from 4-4 is an IA artifact (which data a
   screen touches), not an FR (what a user can do). Do not mix the two
-- Do not fill NFR numbers in meaninglessly
-- Do not copy figures from the business plan straight into FR acceptance criteria
+- Do not fill NFR numbers in without a basis — a number with no basis is decoration, not a verification criterion
+- Do not copy figures (target metrics) from the business plan straight into FR acceptance criteria — a business goal and a feature's pass criterion are measured in different units

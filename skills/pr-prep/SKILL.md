@@ -1,6 +1,6 @@
 ---
 name: pr-prep
-description: Prepares a change so it can be raised as a PR/MR — collects the diff, judges the reversibility class, runs the verification commands, and writes a body with the sections that class requires (rollback procedure, call sites, intervention rationale). Use when the user asks to "prepare a PR", "prepare an MR", "open a PR", or for the "PR body".
+description: Prepares a change to be raised as a PR/MR — collects the diff, judges the risk class, runs the verification commands, and writes a body with the rollback procedure and blast radius. Use when the user says "prepare a PR", "open a PR", "write the MR description", or is about to put a change in front of teammates. For finding bugs in code use /code-review; for tidying dev docs after implementation use /completion-review.
 ---
 
 # PR Prep
@@ -17,7 +17,21 @@ check whether `git remote get-url origin` contains `github.com` or `gitlab.com`.
 **ask the user** — everything up to Step 6 is the same either way, so the moment to ask is Step 7.
 GitHub has PRs, GitLab has MRs.
 
+Copy this checklist into your reply and tick it off as you go:
+
+```
+- [ ] 1 Collect the diff (confirm the base branch)
+- [ ] 2 Judge the reversibility class
+- [ ] 3 Check the mandatory sections (stop if they cannot be filled)
+- [ ] 4 Run the verification commands
+- [ ] 5 Re-verify the prior decisions
+- [ ] 6 Write the body
+- [ ] 7 Create after the user confirms
+```
+
 ## Step 1: What changed
+
+Run the commands below as written (they contain the base-branch detection, and changing them produces the wrong diff):
 
 ```bash
 git rev-parse -q --verify HEAD >/dev/null 2>&1 || { echo "0 commits — nothing to raise"; exit; }

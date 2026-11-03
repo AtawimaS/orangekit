@@ -2,6 +2,22 @@
 
 **Load this reference when:** writing or changing tests, adding mocks, or tempted to add test-only methods to production code.
 
+## Contents
+
+- Overview
+- The Iron Laws
+- Anti-Pattern 1: Testing Mock Behavior
+- Anti-Pattern 2: Test-Only Methods in Production
+- Anti-Pattern 3: Mocking Without Understanding
+- Anti-Pattern 4: Incomplete Mocks
+- Anti-Pattern 5: Integration Tests as Afterthought
+- When Mocks Become Too Complex
+- TDD Prevents These Anti-Patterns
+- Quick Reference
+- Red Flags
+- The Bottom Line
+
+
 ## Overview
 
 Tests must verify real behavior, not mock behavior. Mocks are a means to isolate, not the thing being tested.

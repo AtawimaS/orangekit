@@ -1,6 +1,6 @@
 ---
 name: seo-strategy
-description: 3-mode SEO analysis — page optimization (keywords · LSI · meta · structured data) · full site audit · AI search optimization. The result is an interactive HTML report. Use for "SEO analysis", "SEO optimization", "site audit", "keyword analysis", "meta tags", "AI SEO", "LLM optimization". Called as Stage 3 of marketing-workflow.
+description: Analyzes SEO in three modes and produces an interactive HTML report — page optimization (keywords, LSI, meta, structured data), a full site audit, and AI-search (ChatGPT, Perplexity) citation optimization. Use when a site does not show up in search, when the user wants a post to rank higher, or for SEO, meta tag, or AI SEO requests. For competitor or market research itself, use /research.
 ---
 
 # SEO Strategy
@@ -46,7 +46,7 @@ Additional checks and recommendations when the project is Next.js based. Details
 
 | file | when to read it |
 | --- | --- |
-| [references/scoring-criteria.md](references/scoring-criteria.md) | at Step 4, when computing the score |
+| [references/scoring-criteria.md](references/scoring-criteria.md) | in Steps 3A and 3B, when computing the score for Modes 1 and 2 |
 | [references/technical-seo-checklist.md](references/technical-seo-checklist.md) | only in Mode 2 (site audit) |
 | [references/nextjs-seo-guide.md](references/nextjs-seo-guide.md) | only when the target is a Next.js project |
 | [references/ai-seo-guide.md](references/ai-seo-guide.md) | only in Mode 3 (AI SEO) |

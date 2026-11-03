@@ -2,6 +2,15 @@
 
 Frameworks and templates for business planning, referenced from SKILL.md.
 
+## Contents
+
+- 1. 5C Analysis guide
+- 2. Lean Canvas template
+- 3. Pricing framework
+- 4. Risk matrix template
+- 5. Business plan output template
+
+
 ---
 
 ## 1. 5C Analysis guide

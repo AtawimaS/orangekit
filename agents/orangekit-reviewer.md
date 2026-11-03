@@ -179,7 +179,7 @@ Start from the context pack you were given (diff range · spec location · invar
 If you were called with no lens specified, look at all of A~E as before.
 
 Calling an external model is optional — lens diversity is the essence, model diversity is incidental.
-If you judge that another external-model lens is needed, **propose** `/codex-claude-loop` in the report —
+If you judge that another external-model lens is needed, **propose** `/codex-cross-check` in the report —
 do not run it yourself (the source leaves the machine, so the user's consent comes first).
 
 ## Severity

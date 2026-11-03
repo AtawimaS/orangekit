@@ -1,13 +1,24 @@
 ---
-name: codex-claude-loop
-description: A dual-AI loop that cross-verifies code independently with OpenAI Codex. Use when the user has requested or accepted an external-model lens during an Irreversible review, or when the user asks for code-quality verification. Source is sent to an external model, so never run it without prior consent.
+name: codex-cross-check
+description: Has OpenAI Codex verify code independently and runs a cross-check loop in which Claude reviews and applies the findings. Use when the user requests or accepts an external-model review ("cross-check with Codex", "have another AI look at it") and for reviewing Irreversible changes. Source is sent to an external model, so never run it without consent. For an ordinary diff review use /code-review.
 ---
 
 # Codex-Claude Engineering Loop
 
 A dual-AI quality-assurance loop in which Claude Code implements and Codex verifies.
 
-> Shared workflow (Steps 1/3/4/6, error handling, best practices): see `references/shared-workflow.md`
+> The shared workflow (Steps 1/3/4/6, error handling, best practices) is in `references/shared-workflow.md` (56 lines).
+> Read it when you reach Steps 1-4. There are no scripts.
+
+Copy this checklist into your response to show progress:
+
+```
+- [ ] Step 0 Readiness check (plugin/CLI, authentication)
+- [ ] Step 0.5 Consent to external transmission (after stating what will be sent)
+- [ ] Step 1 Plan -> Step 2 Verify the plan
+- [ ] Step 3-4 Implement and fix (shared)
+- [ ] Step 5 Cross-review -> hand off to receiving-code-review
+```
 
 ## Two execution paths, one credential
 

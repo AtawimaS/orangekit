@@ -389,12 +389,12 @@
       }
     },
     {
-      "id": "codex-claude-loop",
+      "id": "codex-cross-check",
       "kind": "skill",
       "phase": [
         "P6"
       ],
-      "path": "skills/codex-claude-loop/SKILL.md",
+      "path": "skills/codex-cross-check/SKILL.md",
       "when": "Irreversible cross-verification — adds an external model (Codex) lens"
     },
     {
@@ -672,11 +672,11 @@
     },
     {
       "from": "cross-check",
-      "to": "codex-claude-loop",
+      "to": "codex-cross-check",
       "cond": "when external model verification is chosen"
     },
     {
-      "from": "codex-claude-loop",
+      "from": "codex-cross-check",
       "to": "receiving-code-review",
       "cond": "external review verdict returned"
     },

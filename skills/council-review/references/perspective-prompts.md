@@ -3,6 +3,13 @@
 Prompt templates to hand to Council Review's three perspective agents.
 Substitute `{context_brief}` into each prompt before use.
 
+## Contents
+
+- Technical perspective prompt (Technical Perspective)
+- Business perspective prompt (Business Perspective)
+- UX perspective prompt (User Experience Perspective)
+
+
 ---
 
 ## Technical perspective prompt (Technical Perspective)

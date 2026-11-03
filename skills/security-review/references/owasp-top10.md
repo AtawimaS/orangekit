@@ -3,6 +3,12 @@
 <!-- Inspired by: davila7/claude-code-templates `owasp-security` (MIT · Copyright (c) 2025 Daniel (San) Ávila)
      Canonical content: the public OWASP Top 10 2021 standard. The prose was not copied; it was rewritten to fit this harness's enforcement model. -->
 
+## Contents
+
+- Delegated — axes the harness already covers thickly
+- New — axes with no canonical source in the harness
+
+
 **Each entry is either "delegated" or "new", never both.** Security knowledge already lives in four
 places (`.claude/rules/security.md` · the axis guide's `policies.md` · `security-vectors.md` ·
 the seam `contract.md`). Writing the same content again here makes it a fifth copy, and

@@ -1,6 +1,6 @@
 ---
 name: scroll-stop-builder
-description: Builds an Apple-style scroll-driven animation website from a video file — FFmpeg frame extraction + Canvas rendering, with 13 optional sections to combine. Use for "scroll-stop site", "scroll animation website", "video scroll site", "Apple-style scroll". Called as Stage 2 of marketing-workflow.
+description: Builds an Apple-style website from a product video where frames advance as the user scrolls — FFmpeg frame extraction and Canvas rendering, with 13 sections to combine. Use when a video file already exists and the user wants a scroll-animation landing or product-intro page implemented. If the AI prompts to make the video are needed first, use /scroll-stop-prompter.
 ---
 
 # Scroll-Stop Builder
@@ -32,8 +32,10 @@ Collect the brand/product name, logo, accent color, background color, and mood/v
 ### Step 3: Analyze the video and extract frames
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/extract-frames.sh   # ${CLAUDE_SKILL_DIR} = the Base directory shown when the skill loads "<VIDEO_PATH>" "<OUTPUT_DIR>" [TARGET_FPS]
+bash ${CLAUDE_SKILL_DIR}/scripts/extract-frames.sh "<VIDEO_PATH>" "<OUTPUT_DIR>" [TARGET_FPS]
 ```
+
+Run the script without reading it. A missing FFmpeg or video ends with exit 2 and a message; a length outside 3–10 seconds only prints a WARN (extraction continues).
 
 ### Step 4: Generate the HTML site
 
@@ -55,7 +57,10 @@ Save `site.md` into the campaign directory.
 
 ## Reference documents
 
-- Section implementation guide: [references/sections-guide.md](references/sections-guide.md) (~250 lines, HTML/CSS/JS for each of the 13 sections)
-- HTML scaffold: [assets/html-template.html](assets/html-template.html)
-- Frame extraction script: [scripts/extract-frames.sh](scripts/extract-frames.sh)
+| File | When to read it |
+| --- | --- |
+| [references/sections-guide.md](references/sections-guide.md) (250 lines, HTML/CSS/JS for each of the 13 sections) | Step 4, only the sections you implement |
+| [assets/html-template.html](assets/html-template.html) | Copy as the scaffold when starting Step 4 |
+| [scripts/extract-frames.sh](scripts/extract-frames.sh) | Run in Step 3 |
+
 - Pipeline integration: the marketing-workflow skill (calls this as Stage 2)

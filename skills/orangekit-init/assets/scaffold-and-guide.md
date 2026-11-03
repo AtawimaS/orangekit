@@ -3,6 +3,13 @@
 
 # Step 8–9.5: dev/ · .gitignore · securing the stack guides
 
+## Contents
+
+- Step 8: Create the dev/ directory
+- Step 9: Update .gitignore
+- Step 9.5: Install the stack rule files · the detailed guide is opt-in (1 question)
+
+
 ### Step 8: Create the dev/ directory
 
 ```

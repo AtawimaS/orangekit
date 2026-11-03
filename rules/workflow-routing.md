@@ -1,4 +1,4 @@
-<!-- orangekit-rule-version: 3.39.0 -->
+<!-- orangekit-rule-version: 3.44.0 -->
 <!-- **Do not add paths: frontmatter.** The moment you do, this turns into conditional loading and
      stops appearing at session start. This card is needed "before work begins", so
      it has to be loaded already at a point when no file has been opened yet.
@@ -59,7 +59,7 @@ refactoring, and refactoring happens only when separately requested.
 | P3 | The work spans sessions (multiple tasks) | `/dev-docs-generator` — if it touches both frontend and backend, do steps 1·2 of "Inner order" below here first |
 | P4 | Always | The main session implements it directly — a behavior change in a repository that has a test runner goes through `/test-driven-development` |
 | P5 | **The reversibility class sets the intensity** | Reversible → `/completion-review` · Costly or higher → `orangekit-reviewer` |
-| P6 | **Irreversible** | `orangekit-reviewer` multi-lens fan-out (+ optional `/codex-claude-loop`) |
+| P6 | **Irreversible** | `orangekit-reviewer` multi-lens fan-out (+ optional `/codex-cross-check`) |
 
 When the **four entry conditions** (intent clear · context current · impact radius known · verification path exists) are
 all met, **skip P0~P3.** The numbers mark an order, not an obligation —

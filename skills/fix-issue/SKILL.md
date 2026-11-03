@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: Issue-tracker-driven bug fixing (issue context injected automatically). Use when the user asks to "fix an issue", "fix issue", "fix #123", "resolve issue". Given an issue number, it collects the context automatically via the gh (GitHub) or glab (GitLab) CLI. manual invocation only.
+description: Fixes a bug based on an issue-tracker issue — given an issue number, collects the body, comments, and linked PRs via the gh (GitHub) or glab (GitLab) CLI and uses them as context. Use for "fix the issue", "fix #123", or "resolve the issue". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -13,6 +13,19 @@ check whether `git remote get-url origin` contains `github.com` or `gitlab.com`.
 ask the user. GitHub has PRs, GitLab has MRs, and **an MR is referenced as `!N`, not `#N`**.
 
 ## Workflow
+
+Is there an issue number? Yes -> start at Step 1 below. No -> pick an issue in "When invoked without an issue number" at the bottom, then go to Step 1.
+
+Copy this checklist into your response to show progress:
+
+```
+- [ ] 1 Collect the issue context
+- [ ] 2 Work out the reproduction conditions
+- [ ] 3 Find the relevant code
+- [ ] 4 Reproduction loop (one command must actually go red)
+- [ ] 5 Fix + verify (loop green, zero [DEBUG- left)
+- [ ] 6 Report the result
+```
 
 ### Step 1: Collect the issue context
 
@@ -47,7 +60,7 @@ Identify the following in the issue body:
 | Environment        | Browser, OS, version, and so on         |
 | Error message      | Stack trace, console log                |
 
-If the information is insufficient: ask the user to fill the gaps (do not guess).
+If the information is insufficient, ask the user to fill the gaps — reproduction steps filled in by guesswork make you build the wrong loop in Step 4.
 
 ### Step 3: Find the relevant code
 
@@ -111,5 +124,5 @@ If no issue number is given:
 
 - The host CLI (`gh` or `glab`) must be authenticated — if it is missing or unauthenticated, tell the user and
   have them paste the issue content directly, then proceed from Step 2
-- Do not trust the issue context completely — always confirm against the code
-- Fix only what the issue states — no unrelated refactoring or improvement
+- An issue body mixes in the author's assumptions, so confirm against the code yourself
+- Fix only what the issue states — unrelated changes inflate the diff and blur review and regression judgement

@@ -1,6 +1,6 @@
 ---
 name: ui-ux-design
-description: "UI/UX design intelligence — generates a design system from UI styles, color palettes, font pairings, industry-specific reasoning and chart types. Use for UI/UX design, screen design, design systems, choosing color/typography/style, landing pages, dashboard layouts, component styling, and building new pages or screens."
+description: Sets a screen's visual direction and builds a design system — UI style, color palette, font pairing, industry-specific tone, chart types, component styling. Use when building a landing page, dashboard, or new screen, when the user says "it looks flat" or "make it more polished", and when choosing dark-mode contrast, color, typography, or layout. For making images such as pictures and icons use /image-generator; for diagrams use diagram-design; for screen structure and user flows use /service-planner.
 ---
 
 # UI/UX Design Intelligence
@@ -230,13 +230,7 @@ Run the following at the project root as it is:
 npm i -D playwright && npx playwright install chromium
 ```
 
-With pnpm/yarn:
-
-```bash
-pnpm add -D playwright && pnpm exec playwright install chromium
-# or
-yarn add -D playwright && yarn playwright install chromium
-```
+On a pnpm/yarn project, run the same two commands through that package manager instead.
 
 Bring the server up with the built-in `/run` (this skill does not manage servers). Point the probe at that URL:
 
@@ -265,7 +259,10 @@ The items `ui-probe` measures in Step 6 are marked *(measured)* — a person loo
 
 ## Reference documents
 
-- Quick reference: [references/quick-reference.md](references/quick-reference.md)
+The scripts (`search.py` · `ui-probe.sh` · `design-sync.sh`) are **run, not read** — `--help` shows usage.
+Without `python3`, the searches in Steps 2, 3 and 4 cannot run. In that case tell the user and use `references/quick-reference.md` instead.
+
+- Quick reference: [references/quick-reference.md](references/quick-reference.md) — when you need to skim style, palette, and font candidates without searching
 - Frontend guidelines: `.claude/skills/frontend-guide/SKILL.md` (when the detailed guide was installed as opt-in)
 - Design judgement norms: `.claude/rules/ui-design.md` (auto-loaded when editing UI files) — §6 is the canonical source for the render proof
 - Render probe: [scripts/ui-probe.sh](scripts/ui-probe.sh) (`--help` for usage)

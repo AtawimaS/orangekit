@@ -6,6 +6,13 @@
 Fill in the `<...>` and hand it over as is. **The auditor does not see the generation conversation** — the audit is independent
 only if they read the artifacts and judge from those alone.
 
+## Contents
+
+- Audit discipline
+- Work on the premise of being interrupted — audits included
+- Inspection axes
+- Return format (the final text = data; no human pleasantries needed)
+
 | Audit | Assigned axis | Unique input |
 | --- | --- | --- |
 | **A. Execution** | Whatever in 4 (security) · 3 (cut surfaces) can be confirmed by running it | The `pack-smoke.sh --keep` working directory · `vector-report.tsv` |

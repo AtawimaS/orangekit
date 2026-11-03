@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when adding or changing behavior in code that has a test runner — write the failing test first, then the minimal code. Not for throwaway prototypes, config, generated code, or docs. Running build/test after a source edit is already enforced by the T0 verification rule and the build-gate hook; this skill covers the red-green-refactor loop, where tests go (seams), and what makes a passing test worthless.
+description: Implements new behavior test-first (red-green-refactor) — pins the expected result in a failing test, passes it with minimal code, picks where the test goes (the seam), and avoids worthless tests. Use when adding a new rule or feature to code that has a test runner or changing its behavior, and for TDD requests. Not for one-line bug fixes, adding a single test, prototypes, config, generated code, or docs.
 ---
 
 # Test-Driven Development (TDD)
@@ -27,6 +27,15 @@ NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 Write code before the test? Delete it. Start over. No exceptions.
 
 ## Red-Green-Refactor
+
+Copy this checklist into the reply for each cycle:
+
+```
+- [ ] Seam agreed
+- [ ] RED: test written, seen failing for the right reason
+- [ ] GREEN: minimal code, whole suite passes
+- [ ] REFACTOR: tests still green
+```
 
 ### RED - Write Failing Test
 

@@ -1,6 +1,6 @@
 ---
 name: health-check
-description: One-shot project status check (build, lint, typecheck, tests, SonarQube static analysis). Use when the user asks for a "status check", "health check", "build check", or "project status". manual invocation only.
+description: Checks project status in one pass — build, lint, typecheck, tests, dependency vulnerabilities, SonarQube static analysis. Use for "status check", "health check", "build check", or "project status". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -13,6 +13,8 @@ a structured report. Static analysis runs **only after asking the user**, and on
 
 ### Step 1: Decide the scope of the check
 
+Once the scope is set, copy the steps to run from the table below into your response as a checklist to show progress (one line per item: `- [ ] 2 Build`, `- [ ] 3 Lint` ... `- [ ] 6 Report`).
+
 | Scope           | Trigger                               | Steps to run            |
 | --------------- | ------------------------------------- | ----------------------- |
 | Full check      | Default, "everything", "health check" | 2 → 3 → 4 → 5 → 5.5 → 6 |
@@ -22,7 +24,8 @@ a structured report. Static analysis runs **only after asking the user**, and on
 
 ### Step 2: Build and typecheck
 
-`${CLAUDE_SKILL_DIR}` is substituted by Claude Code — it resolves wherever the skill is installed (personal, project, or plugin):
+**Run** `scripts/build-parser.sh` rather than reading it (it needs `jq` — without it, it prints `{"success":false,"error":"jq required"}` and exits 2, so tell the user to install jq). Use the commands below as written and do not add flags.
+`${CLAUDE_SKILL_DIR}` is substituted by Claude Code:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/build-parser.sh build
@@ -154,7 +157,6 @@ Overall status: [Good/Caution/Danger]
 
 ## Cautions
 
-- build-parser.sh emits JSON, which is more token-efficient than the raw build log
 - Each check is independent — if one fails, the rest still run
 - Show details only for FAIL items, to keep the output minimal
 - Do not mix "not checked" with "PASS" — recording something you could not see for lack of a tool as a pass makes the report a lie

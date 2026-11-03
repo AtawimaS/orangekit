@@ -119,7 +119,7 @@
 <text class="gk" x="1410" y="252" text-anchor="middle" fill="var(--g-soft)">reviewer's extra pass</text>
 <rect x="1560" y="210" width="200" height="56" rx="6" fill="var(--g-surface)" stroke="var(--g-line)" stroke-width="1.4"/>
 <rect x="1569" y="221" width="3" height="34" fill="var(--g-skill)"/>
-<text class="gn" x="1660" y="234" text-anchor="middle" fill="var(--g-skill)">codex-claude-loop</text>
+<text class="gn" x="1660" y="234" text-anchor="middle" fill="var(--g-skill)">codex-cross-check</text>
 <text class="gk" x="1660" y="252" text-anchor="middle" fill="var(--g-soft)">external model check</text>
 <rect x="1560" y="316" width="200" height="56" rx="6" fill="var(--g-surface)" stroke="var(--g-line)" stroke-width="1.4"/>
 <rect x="1569" y="327" width="3" height="34" fill="var(--g-skill)"/>

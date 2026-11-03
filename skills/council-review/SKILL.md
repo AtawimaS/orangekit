@@ -1,6 +1,6 @@
 ---
 name: council-review
-description: For planning decisions that are expensive to reverse (business direction, architecture choice), analyzes technical/business/UX perspectives in parallel and produces one integrated recommendation. Use for "multi-perspective analysis", "council review", "three-lens review".
+description: Analyzes a hard-to-reverse planning or architecture decision (swapping the database, splitting regions or services, changing business direction) from technical, business, and UX perspectives in parallel and produces one integrated recommendation. Use just before committing to a big decision, for "look at this from several angles", council review, or a three-lens review. If the idea is still being broadened, use /brainstorming.
 ---
 
 # Council Review
@@ -11,11 +11,22 @@ Analyzes a planned feature **in parallel** from three perspectives — technical
 > code already written through the correctness · security · reversibility lenses is `orangekit-reviewer`'s Irreversible fan-out.
 
 <HARD-GATE>
-The integrated recommendation from the three-perspective analysis must not be passed to the next stage without user confirmation.
-Always pass it on only after the user confirms.
+Do not pass the integrated recommendation from the three-perspective analysis to the next stage before the user confirms — doing so would commit a costly-to-reverse decision without the user knowing.
+Pass it on only after the user confirms.
 </HARD-GATE>
 
 ## Workflow
+
+Copy this checklist into your response to show progress.
+
+```
+- [ ] 1 Check prerequisites
+- [ ] 2 Context brief
+- [ ] 3 Dispatch the three perspectives in parallel
+- [ ] 4 Detect conflicts
+- [ ] 5 Re-query (CONFLICTED only, once)
+- [ ] 6 Report, user confirmation, decision record
+```
 
 ### Step 1: Identify the input and check the prerequisites
 
@@ -29,7 +40,7 @@ Always pass it on only after the user confirms.
 
 ### Step 2: Assemble the context
 
-Collect the artifacts from ideation through service into a combined context brief (~500 words).
+Collect the artifacts below into a combined context brief (~500 words).
 
 **What to collect:**
 - `dev/docs/service/service-plan-<name>.md` (required) — functional requirements (FR-xxx), non-functional requirements (NFR-xxx), key screens, data model
@@ -101,7 +112,10 @@ Confirming this result passes it to the prompt-enhancement stage.
 
 ## Reference documents
 
-- Per-perspective prompt templates: `references/perspective-prompts.md`
-- Integrated report output format: `assets/council-report-template.md`
+| File | When to read it |
+| --- | --- |
+| `references/perspective-prompts.md` | Step 3 — substitute `{context_brief}` into the subagent prompt (read only the relevant perspective's section) |
+| `assets/council-report-template.md` | Step 6 — fill the report in exactly this structure |
+
 - Service plans live in `dev/docs/service/`
 - Council Reviews live in `dev/docs/council/`

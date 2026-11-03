@@ -1,6 +1,6 @@
 ---
 name: prd-reviewer
-description: Diagnoses the quality of an existing PRD and derives improvements. Supports both single and modular PRDs, checking implementation alignment, requirement clarity, internal consistency, and design principles, and producing a report that names where each fix belongs. Required after a PRD edit (the doc-dependency card triggers it).
+description: Diagnoses an existing PRD (single or modular) for spec that diverges from the code, ambiguous requirements, and internal contradictions, and produces a report naming where each fix belongs. Use right after a PRD edit, when the user says "review the PRD", or when looking for places a developer would misread. If no PRD exists yet use /prd-generator.
 ---
 
 # PRD Reviewer
@@ -8,6 +8,16 @@ description: Diagnoses the quality of an existing PRD and derives improvements. 
 A skill that diagnoses the quality of an existing PRD document and derives improvements with the exact place each one belongs. It supports both single PRDs and modular PRDs (prd-overload + Phase Sub PRDs + Shared documents).
 
 ## Workflow
+
+Copy this checklist into your reply and tick it off as you go.
+
+```
+- [ ] Step 1 Decide target, type, and scope
+- [ ] Step 2 Diagnose per axis
+- [ ] Step 3 Report (by severity)
+- [ ] Step 4 Apply the approved improvements
+- [ ] Step 5 Re-verify, then report completion
+```
 
 ### Step 1: Pick the PRD + detect its type + choose the diagnostic scope
 
@@ -37,7 +47,7 @@ A skill that diagnoses the quality of an existing PRD document and derives impro
 
 ### Step 2: Diagnose PRD quality
 
-Read the target PRD and diagnose it. For every issue found on any axis, **always record its location in the PRD (section name + the content in question)**.
+Read the target PRD and diagnose it. For every issue found on any axis, record its location in the PRD (section name + the content in question) — without a location the user cannot find where to apply the fix.
 
 **Reporting bar — falsifiability**: to raise something as an issue you must be able to write down *the point where that sentence makes
 the implementation diverge*. "It might be…" is a guess, not an issue. If you cannot write it, do not report it.
@@ -118,7 +128,7 @@ Does the PRD conflict with the principles declared in the project's `CLAUDE.md` 
 
 ### Step 4: Apply the PRD updates
 
-Apply only the improvements the user approved.
+Apply only the improvements the user approved. After applying, **re-diagnose the axes you changed once (reverse verification)** and report any remaining Criticals in Step 5 as "N remaining" — fixing more requires fresh approval of the improvements, so do not loop automatically.
 
 ### Step 5: Completion report
 

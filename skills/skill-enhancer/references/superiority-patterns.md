@@ -4,6 +4,17 @@ Extracted from this repository's ✅ 21 skills (full review 2026-08-19). Each pa
 together with **the reason the skill-creator methodology structurally cannot produce it** —
 that reason is exactly why this catalog exists.
 
+## Contents
+
+- P1. Boundary declaration — the description contracts the division of labor with its neighbors
+- P2. Behavioral contract — designs the manner of response itself, not the artifact
+- P3. Failure path — failure is a branch, not a termination
+- P4. Machine-first verification — the model judges only what a machine cannot
+- P5. Ecosystem wiring — a skill is not a file but a node in the graph
+- P6. Token discipline — subtraction is the default
+- Applicability matrix — over-application is bloat, not hardening
+
+
 > skill-creator's eval loop scores "is the artifact good".
 > The 6 below design not the artifact but **the environment the skill sits in and its behavior on failure**.
 > A handful of test prompts do not expose this dimension.
@@ -104,7 +115,7 @@ Who calls me, what I return and to whom, and which variable I branch on
 can only be written by someone who knows the whole graph.
 
 **Three pieces of evidence**:
-- Invocation contract: codex-claude-loop desc "invoked when orangekit-reviewer's cross-check condition
+- Invocation contract: codex-cross-check desc "invoked when orangekit-reviewer's cross-check condition
   is met" + a graph edge declaring the return target (receiving-review)
 - Unified routing variables: every branch uses only the reversibility class and the count of unmet entry
   conditions (the measured counterexample where mixing S/M/L left council-review waiting on a dead variable)

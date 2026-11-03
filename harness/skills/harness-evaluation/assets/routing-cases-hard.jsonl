@@ -1,0 +1,118 @@
+{"id":"h-brainstorming-1","query":"I can't tell yet whether we should get company announcements through Slack or build a notification center inside the app. Let's weigh a bunch of things together.","expect":["brainstorming"],"kind":"pos"}
+{"id":"h-brainstorming-2","query":"When a customer asks for a refund I'd like something to handle it automatically, but I don't know what ways there are to do it. Start by spreading out some options for me.","expect":["brainstorming"],"kind":"pos"}
+{"id":"h-brainstorming-3","query":"Someone brought up adding recommendations to our service, but nothing about what or how is decided. Want to talk it through and find a direction?","expect":["brainstorming"],"kind":"pos"}
+{"id":"h-business-planner-1","query":"The CEO wants us to build this feature, and honestly I can't tell whether it makes money. Start by working out who would pay.","expect":["business-planner"],"kind":"pos"}
+{"id":"h-business-planner-2","query":"I'm torn between keeping the API we give away free or adding a paid tier. Lay out whether we'd actually come out ahead.","expect":["business-planner"],"kind":"pos"}
+{"id":"h-business-planner-3","query":"If we expand the service into Vietnam, what do we gain and what does it cost? Work out the numbers and put it in a document for the decision.","expect":["business-planner"],"kind":"pos"}
+{"id":"h-codebase-survey-1","query":"Since installing the harness, the description of this repo's structure seems to say something different from what's actually there. Realign it to the code as it is now.","expect":["codebase-survey"],"kind":"pos"}
+{"id":"h-codebase-survey-2","query":"I have a rules doc from last year, but the folders have changed a lot since. Update it to match the current state.","expect":["codebase-survey"],"kind":"pos"}
+{"id":"h-codebase-survey-3","query":"I only just attached agent rules to a project that's been around forever. Read the actual stack and coding habits from the code and reflect them.","expect":["codebase-survey"],"kind":"pos"}
+{"id":"h-codex-cross-check-1","query":"I fixed the payment module, but I can't trust what I wrote when I'm the one checking it. I'd like to run it separately through an OpenAI model too.","expect":["codex-cross-check"],"kind":"pos"}
+{"id":"h-codex-cross-check-2","query":"Have a model from a company other than Anthropic verify this diff independently. Sending the source outside is fine.","expect":["codex-cross-check"],"kind":"pos"}
+{"id":"h-codex-cross-check-3","query":"Before I run the migration I'd like it filtered through another AI's eyes one more time. Can you run it that way?","expect":["codex-cross-check"],"kind":"pos"}
+{"id":"h-completion-review-1","query":"The feature is fully implemented. Now bring the progress docs and the checklist status in line with the current code.","expect":["completion-review"],"kind":"pos"}
+{"id":"h-completion-review-2","query":"The work is done, but the docs in dev/active are still as of yesterday. Wrap up the finished ones.","expect":["completion-review"],"kind":"pos"}
+{"id":"h-completion-review-3","query":"I finished the login overhaul. Reflect the changed endpoints in the API docs and close out the to-do list.","expect":["completion-review"],"kind":"pos"}
+{"id":"h-council-review-1","query":"We have to commit to moving from the monolith to microservices this quarter, and once it's decided it's hard to undo. Weigh the tech, the money and the users' side together and give me a conclusion.","expect":["council-review"],"kind":"pos"}
+{"id":"h-council-review-2","query":"A proposal came in to overhaul the pricing structure of our main product wholesale. If it goes wrong we can't roll it back, so weigh it from several angles at once and give me a single recommendation.","expect":["council-review"],"kind":"pos"}
+{"id":"h-council-review-3","query":"We have to decide this week whether to move the DB from Postgres to DynamoDB. Evaluate it separately from the engineering, business and user side, then combine them.","expect":["council-review"],"kind":"pos"}
+{"id":"h-dev-docs-generator-1","query":"The planning doc is locked. Before development starts, create a set of docs broken down by unit of work.","expect":["dev-docs-generator"],"kind":"pos"}
+{"id":"h-dev-docs-generator-2","query":"The spec got approved, so set up the working docs under dev/active so I can start implementing.","expect":["dev-docs-generator"],"kind":"pos"}
+{"id":"h-dev-docs-generator-3","query":"I'm about to do a big refactoring, and before starting I want to write down in a document what we'll do step by step and what the current background is.","expect":["dev-docs-generator"],"kind":"pos"}
+{"id":"h-image-generator-1","query":"I need a photo-like background picture to go across the top of the landing page. Make me one that feels like a cat walking across space.","expect":["image-generator"],"kind":"pos"}
+{"id":"h-image-generator-2","query":"I need one app-intro image to put on the App Store, and there's no designer, so you make it.","expect":["image-generator"],"kind":"pos"}
+{"id":"h-image-generator-3","query":"Make a thumbnail picture that shows up when the link is shared in KakaoTalk, with our service name on it.","expect":["image-generator"],"kind":"pos"}
+{"id":"h-pr-prep-1","query":"Before I put this up for merge, summarize the changes so the team lead can grasp it at a glance, and run the checks too.","expect":["pr-prep"],"kind":"pos"}
+{"id":"h-pr-prep-2","query":"The branch work is finished and I'm about to put it up. Write it so the way to revert and the blast radius aren't left out of the body.","expect":["pr-prep"],"kind":"pos"}
+{"id":"h-pr-prep-3","query":"Ready to push this branch up for the team. Can you collect the diff, run the checks and write the description body?","expect":["pr-prep"],"kind":"pos"}
+{"id":"h-prd-generator-1","query":"We decided to build the notification settings feature, and there's no planning doc in dev/docs yet. Start by writing the feature spec.","expect":["prd-generator"],"kind":"pos"}
+{"id":"h-prd-generator-2","query":"It's settled that we're building the subscription-cancellation-defense feature, and I need a product document to hand to the dev team.","expect":["prd-generator"],"kind":"pos"}
+{"id":"h-prd-generator-3","query":"The new settlement module is big, so one document won't do. Make it a product definition document split by phase.","expect":["prd-generator"],"kind":"pos"}
+{"id":"h-prd-reviewer-1","query":"Check whether the product document I wrote diverges from the actual implementation anywhere, and whether any parts contradict each other.","expect":["prd-reviewer"],"kind":"pos"}
+{"id":"h-prd-reviewer-2","query":"I just edited the planning document. Skim it for ambiguous sentences or contradictions and tell me what needs fixing.","expect":["prd-reviewer"],"kind":"pos"}
+{"id":"h-prd-reviewer-3","query":"Diagnose how far the payment planning document under dev/docs has drifted from the current code.","expect":["prd-reviewer"],"kind":"pos"}
+{"id":"h-prompt-enhancer-1","query":"Add social login buttons to the login page. Google and Kakao -- the approach is already decided.","expect":["prompt-enhancer"],"kind":"pos"}
+{"id":"h-prompt-enhancer-2","query":"Add sorting options to the product list: by price and by newest. It has to follow this project's conventions.","expect":["prompt-enhancer"],"kind":"pos"}
+{"id":"h-prompt-enhancer-3","query":"Add one account-deletion API. Figure out our structure first and fit it.","expect":["prompt-enhancer"],"kind":"pos"}
+{"id":"h-receiving-code-review-1","query":"I think a few of the comments I got yesterday are wrong. Sort out which ones are really valid by looking at the code.","expect":["receiving-code-review"],"kind":"pos"}
+{"id":"h-receiving-code-review-2","query":"A colleague says to rewrite this whole function and I'm not convinced. Check whether what they pointed out is true, and back up your rebuttals with evidence.","expect":["receiving-code-review"],"kind":"pos"}
+{"id":"h-receiving-code-review-3","query":"Another AI flagged 7 things in my change. I don't want to apply them blindly. Check which ones are real and handle them by severity.","expect":["receiving-code-review"],"kind":"pos"}
+{"id":"h-research-1","query":"Look up on the web what competitors are charging these days and summarize it.","expect":["research"],"kind":"pos"}
+{"id":"h-research-2","query":"Check the latest sources on exactly how the Stripe and Toss Payments fee structures work right now, and leave it as a document.","expect":["research"],"kind":"pos"}
+{"id":"h-research-3","query":"Find out whether Indonesia changed anything in its personal-data laws this year, and tell me with source links.","expect":["research"],"kind":"pos"}
+{"id":"h-security-review-1","query":"We launch next week. Sweep the whole repo for anywhere we could get hacked, including whether any dependencies have known vulnerabilities.","expect":["security-review"],"kind":"pos"}
+{"id":"h-security-review-2","query":"I'm worried someone accidentally put an API key in the code. Search the whole repo and even the git history.","expect":["security-review"],"kind":"pos"}
+{"id":"h-security-review-3","query":"I'm uneasy about the payment integration, so check the security state of the whole service, including the parts that handle card data.","expect":["security-review"],"kind":"pos"}
+{"id":"h-service-planner-1","query":"The boss wants a reservation feature, but in what order users go through it and which screens it needs aren't decided at all. Set up the structure first.","expect":["service-planner"],"kind":"pos"}
+{"id":"h-service-planner-2","query":"We need a membership-tier system. List concretely what features it should have. The screens and flow are a blank slate.","expect":["service-planner"],"kind":"pos"}
+{"id":"h-service-planner-3","query":"They say we're building a new onboarding. Work out how many steps there are and what we need to collect at each step.","expect":["service-planner"],"kind":"pos"}
+{"id":"h-shortcut-ledger-1","query":"Early on, to get things running, I stuffed a cache into memory and wrote 'fine up to 1,000 users' in places. We have 100,000 users now, so shouldn't we revisit that kind of thing?","expect":["shortcut-ledger"],"kind":"pos"}
+{"id":"h-shortcut-ledger-2","query":"Before the release, go through the places we deliberately cut corners and moved on, see whether they're still okay, and pick which ones to fix.","expect":["shortcut-ledger"],"kind":"pos"}
+{"id":"h-shortcut-ledger-3","query":"Gather the comments in the code that say 'change this when we scale' and judge whether they've passed their deadline at current traffic.","expect":["shortcut-ledger"],"kind":"pos"}
+{"id":"h-skill-enhancer-1","query":"I have a skill I made, but it keeps firing in the wrong places and has no handling when it fails. Reinforce it so it's solid and usable.","expect":["skill-enhancer"],"kind":"pos"}
+{"id":"h-skill-enhancer-2","query":"I just made a skill with skill-creator. First judge whether to leave it as is or merge it with another one, then stabilize it.","expect":["skill-enhancer"],"kind":"pos"}
+{"id":"h-skill-enhancer-3","query":"I ran a skill evaluation and it flagged a defect that the boundaries overlap. Fix it and make it sturdy.","expect":["skill-enhancer"],"kind":"pos"}
+{"id":"h-stack-guide-generator-1","query":"We've decided to build the app in Flutter this time, but they say there's nothing provided by default for this stack. Read the official docs and make a guidelines file we should follow when writing.","expect":["stack-guide-generator"],"kind":"pos"}
+{"id":"h-stack-guide-generator-2","query":"I switched to SvelteKit. Put together some guidance that makes the agent follow this framework's conventions.","expect":["stack-guide-generator"],"kind":"pos"}
+{"id":"h-stack-guide-generator-3","query":"I'm going to use a Rust backend, and I want Claude to write code following this language's best practices.","expect":["stack-guide-generator"],"kind":"pos"}
+{"id":"h-test-driven-development-1","query":"I'm building new logic that blocks stacking coupons, and I want to pin down the expected behavior in code first and then implement to match it.","expect":["test-driven-development"],"kind":"pos"}
+{"id":"h-test-driven-development-2","query":"I need to add a new rule to the discount calculator. Start by making one failing thing, then go with the minimum that passes it.","expect":["test-driven-development"],"kind":"pos"}
+{"id":"h-test-driven-development-3","query":"I need to put a new cart-total behavior into a project that has jest. Start by deciding at what unit we verify it, then proceed.","expect":["test-driven-development"],"kind":"pos"}
+{"id":"h-ui-ux-design-1","query":"Our dashboard looks too dull. Set the overall tone -- colors and text style -- that suits a healthcare service.","expect":["ui-ux-design"],"kind":"pos"}
+{"id":"h-ui-ux-design-2","query":"I'm building a new landing page and have no feel for what mood to go for. Recommend a style that fits our industry.","expect":["ui-ux-design"],"kind":"pos"}
+{"id":"h-ui-ux-design-3","query":"The cards and buttons in the admin page all have different shapes. Make one consistent set of style standards.","expect":["ui-ux-design"],"kind":"pos"}
+{"id":"h-scroll-stop-builder-1","query":"I have a 3-second video of a product spinning, and I want a site like an Apple product page where the video advances one frame at a time as you scroll down the page.","expect":["scroll-stop-builder"],"kind":"pos"}
+{"id":"h-scroll-stop-builder-2","query":"Take one mp4, pull frames with FFmpeg, and build a website that animates on a canvas. Give it an Apple feel.","expect":["scroll-stop-builder"],"kind":"pos"}
+{"id":"h-scroll-stop-builder-3","query":"Turn the new product video into a promo site you can spin through with the mouse wheel.","expect":["scroll-stop-builder"],"kind":"pos"}
+{"id":"h-scroll-stop-prompter-1","query":"I have one photo of the new product, and I need a set of instructions for an AI video that makes it look like it comes apart and then reassembles.","expect":["scroll-stop-prompter"],"kind":"pos"}
+{"id":"h-scroll-stop-prompter-2","query":"I'm going to feed them into Midjourney and Runway separately. Pull the wording to create a scene where our tumbler scatters into parts and then comes back together.","expect":["scroll-stop-prompter"],"kind":"pos"}
+{"id":"h-scroll-stop-prompter-3","query":"I want to turn the product shot into something people stop and stare at. Write three sets of instructions to feed an image model.","expect":["scroll-stop-prompter"],"kind":"pos"}
+{"id":"h-seo-strategy-1","query":"Our blog doesn't show up on the first page of Google. Draft a strategy for what keywords to write posts around.","expect":["seo-strategy"],"kind":"pos"}
+{"id":"h-seo-strategy-2","query":"Work out how to shape the site structure and content topics so traffic from Naver or Google search grows.","expect":["seo-strategy"],"kind":"pos"}
+{"id":"h-seo-strategy-3","query":"Our competitor shows up at the very top when you search, but we're on page 3. Lay out ways to raise our visibility.","expect":["seo-strategy"],"kind":"pos"}
+{"id":"h-near-1","query":"I want to improve login, but I can't decide between social or passkeys. Let's talk about which would suit us.","expect":["brainstorming"],"kind":"near"}
+{"id":"h-near-2","query":"Add avatar upload to the profile page. We've already decided to store them in S3.","expect":["prompt-enhancer"],"kind":"near"}
+{"id":"h-near-3","query":"I'm adding a search feature, and I haven't decided at all where the filters go or on which screen the results show.","expect":["service-planner","brainstorming"],"kind":"near"}
+{"id":"h-near-4","query":"We deploy tomorrow. Give the whole repository one thorough sweep for anything dangerous.","expect":["security-review"],"kind":"near"}
+{"id":"h-near-5","query":"Check whether my branch has any security holes that are newly introduced this time.","expect":["builtin:security-review"],"kind":"near"}
+{"id":"h-near-6","query":"Check whether there's a bug hiding in the change I just made.","expect":["builtin:code-review"],"kind":"near"}
+{"id":"h-near-7","query":"Pick out which of the comments my colleague left are actually worth applying.","expect":["receiving-code-review"],"kind":"near"}
+{"id":"h-near-8","query":"Implementation is done, so check off the to-do list and reflect what changed in the docs.","expect":["completion-review"],"kind":"near"}
+{"id":"h-near-9","query":"Implementation is done and I'm about to put it up to show the teammates. Write the change description and get it ready to go up.","expect":["pr-prep"],"kind":"near"}
+{"id":"h-near-10","query":"I want to turn a deployment-check procedure I repeat into a new skill so Claude uses it on its own.","expect":["skill-creator"],"kind":"near"}
+{"id":"h-near-11","query":"My skill doesn't trigger at the moment it's needed. Polish the description wording so it gets invoked reliably.","expect":["skill-creator","skill-enhancer"],"kind":"near"}
+{"id":"h-near-12","query":"The skill I built is too thin: no failure path and its boundary with other skills is unclear. Raise it to harness grade.","expect":["skill-enhancer"],"kind":"near"}
+{"id":"h-near-13","query":"Make a hand-drawn-style cover picture to hang at the top of my blog.","expect":["image-generator"],"kind":"near"}
+{"id":"h-near-14","query":"I want to draw how an order comes in and flows through to delivery, and put the picture in the document.","expect":["diagram-design"],"kind":"near"}
+{"id":"h-near-15","query":"The card contrast looks off in dark mode. Reset the visual style standards for the whole app.","expect":["ui-ux-design"],"kind":"near"}
+{"id":"h-near-16","query":"The code I just wrote is too long, with similar things repeated. Shorten it.","expect":["simplify"],"kind":"near"}
+{"id":"h-near-17","query":"The part I deliberately hardcoded last time and moved on from -- figure out whether it's time to undo it now.","expect":["shortcut-ledger"],"kind":"near"}
+{"id":"h-near-18","query":"I fixed a one-line null check. Add just one case so it doesn't come back.","expect":["none"],"kind":"near"}
+{"id":"h-near-19","query":"I'm building the new refund-rule logic. Lock in the expected results first, then implement.","expect":["test-driven-development"],"kind":"near"}
+{"id":"h-near-20","query":"Check the official sources for what percent the KakaoPay fee rate is right now and tell me.","expect":["research","none"],"kind":"near"}
+{"id":"h-near-21","query":"Work out whether we'd still come out ahead after fees if we add KakaoPay.","expect":["business-planner"],"kind":"near"}
+{"id":"h-near-22","query":"We have to commit to moving the whole region from Seoul to Singapore. There's no coming back once we go, so look at the technical, cost and user impact together and boil it down to one proposal.","expect":["council-review"],"kind":"near"}
+{"id":"h-near-23","query":"Let's spread out the possible approaches to how we handle data sync together. Nothing is decided yet.","expect":["brainstorming"],"kind":"near"}
+{"id":"h-near-24","query":"This project has no guidance file for Claude to read at all. Make one for the first time.","expect":["init"],"kind":"near"}
+{"id":"h-near-25","query":"I have a CLAUDE.md, but the folder-structure description has drifted far from reality. Rewrite it based on the current code.","expect":["codebase-survey","none"],"kind":"near"}
+{"id":"h-near-26","query":"Launch the app and click the button I just fixed to confirm it works.","expect":["run"],"kind":"near"}
+{"id":"h-near-27","query":"Check the deployment status every 5 minutes and tell me when it finishes.","expect":["loop"],"kind":"near"}
+{"id":"h-near-28","query":"Build a bar chart of quarterly revenue trends on an HTML page.","expect":["diagram-design"],"kind":"near"}
+{"id":"h-near-29","query":"Sketch a few draft logos for our service and show me.","expect":["image-generator"],"kind":"near"}
+{"id":"h-near-30","query":"The feature is confirmed and the screens are all decided. The only thing missing is the product document to hand to the dev team.","expect":["prd-generator"],"kind":"near"}
+{"id":"h-near-31","query":"Not Claude -- you take one more pass over my diff and see if anything was missed.","expect":["builtin:code-review"],"kind":"near"}
+{"id":"h-neg-1","query":"Add just one line to the README about how to install.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-2","query":"Add just one test for this function.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-3","query":"What does this error log mean? TypeError: Cannot read properties of undefined (reading 'map')","expect":["none"],"kind":"neg"}
+{"id":"h-neg-4","query":"Rename the variables so they read better.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-5","query":"I hit a conflict during a git rebase. How do I resolve it?","expect":["none"],"kind":"neg"}
+{"id":"h-neg-6","query":"Just bump the lodash version in package.json.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-7","query":"Explain what this regex matches.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-8","query":"Change only the button color from #333 to #444.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-9","query":"This SQL query is slow. Would adding one index fix it?","expect":["none"],"kind":"neg"}
+{"id":"h-neg-10","query":"Write a one-line commit message. It's a typo fix.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-11","query":"Add a DB_HOST entry to .env.example.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-12","query":"Fix the typo in a comment in this file.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-13","query":"What's the difference between interface and type in TS?","expect":["none"],"kind":"neg"}
+{"id":"h-neg-14","query":"Change the login page title text from 'Log in' to 'Get started'.","expect":["none"],"kind":"neg"}
+{"id":"h-neg-15","query":"It says port 3000 is already in use locally. How do I free it?","expect":["none"],"kind":"neg"}

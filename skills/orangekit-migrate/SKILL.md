@@ -1,6 +1,6 @@
 ---
 name: orangekit-migrate
-description: Converts a project running the ORANGEKIT Devkit v2 harness to v3. Removes dead hooks, rearranges the rules into three tiers, and renames the agents. Use when the user asks for a "harness migration", "v3 conversion", or "orangekit upgrade"; manual invocation only.
+description: Converts a project running the ORANGEKIT Devkit v2 harness to v3 — removes dead hooks, rearranges the rules into three tiers, renames the agents, and updates an outdated orangekit.config.json. Use for "harness migration", "v3 conversion", or "orangekit upgrade". Manual invocation only.
 disable-model-invocation: true
 ---
 
@@ -12,15 +12,30 @@ disable-model-invocation: true
 
 ## Purpose
 
-Converts a project running the v2 harness to the v3 structure.
+Converts a project running the v2 harness to the v3 structure. v2 placed rules directly in the project's `.claude/`, and 10 of its 11 hooks
+were silently dead from path-calculation errors and output-format mismatches. v3 moves the assets
+into plugin ownership and removes the dead hooks.
 
-**Why it is needed**: v2 placed rules directly in the project's `.claude/`, and 10 of its 11 hooks
-were silently dead from path-calculation errors and output-format mismatches. v3 moves those assets
-into plugin ownership so they update automatically, and removes the dead hooks.
+**Which section to go to**
+
+- v2 harness files (`.claude/hooks/`, old rules, old agents) are still there -> start at Step 1 and go in order
+- The harness is already v3 and only `orangekit.config.json` is outdated -> go straight to "Two-axis preset migration" and "App axis migration" at the bottom
+
+Copy this checklist into your response to show progress (Steps 1-7 are ordered, and skipping one means you cannot verify after deleting):
+
+```
+- [ ] 1 Diagnose (doctor --default + project asset list)
+- [ ] 2 Remove (hooks, rules, agents; project additions only after user confirmation)
+- [ ] 3 Install the v3 rules
+- [ ] 4 Confirm what to keep
+- [ ] 5 Clean up CLAUDE.md
+- [ ] 6 Verify (zero failures)
+- [ ] 7 Report
+```
 
 ## Step 1: Diagnose the current state
 
-**Measure** what is there first. Do not delete on a guess.
+Measure what is there first. Do not delete on a guess.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --default
@@ -70,8 +85,8 @@ v3's five hooks are supplied automatically by the plugin, so the project copies 
 | `claude-md-authoring.md` | → deleted |
 | `execution-transparency.md` | → deleted |
 
-**Before removing anything**: check each file for content the project added itself, and
-if there is any, show it to the user and confirm where it should go. Promoted rules may have accumulated here.
+Read each file before deleting it and check for content the project added itself. If there is any, show it to the
+user and confirm where it should go — promoted rules may have accumulated here, and deleting them cannot be undone.
 
 ### Old agents — `.claude/agents/`
 
@@ -117,7 +132,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --default
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --self-test
 ```
 
-**If failures are not zero, the migration is not finished.** Report the remaining failures to the user.
+The pass condition is `0 failures`. If not, the migration is not finished, so report the remaining failures to the user.
+Run the two commands exactly as written and do not change the flags.
 
 ## Step 7: Report
 
@@ -136,7 +152,6 @@ Needs confirmation:
 
 ## Cautions
 
-- **Always read a file before deleting it**, and if the project added content, get the user's confirmation
 - Do not delete everything at once; go category by category and check with `doctor --default` after each step
 - Starting from a clean `git status` makes it easy to undo
 

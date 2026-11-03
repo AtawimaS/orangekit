@@ -56,7 +56,7 @@ LABEL = {
     "security-check": "blocks secrets · destructive cmds", "build-gate": "verification gate",
     "track-skill": "records skill use", "handoff": "handoff note",
     "prd-generator": "writes the PRD", "dev-docs-generator": "dev documents",
-    "completion-review": "closing docs", "codex-claude-loop": "external model check",
+    "completion-review": "closing docs", "codex-cross-check": "external model check",
     "receiving-code-review": "vets incoming feedback", "doctor": "self-verification",
     "lessons": "lessons log", "eval-report": "evaluation report",
     "rule-promotion": "asset promotion", "user-report": "report to a human",
@@ -75,7 +75,7 @@ POS = {
     "verify":               (4, 210),
     "orangekit-reviewer":        (5, 112),
     "cross-check":          (5, 210),
-    "codex-claude-loop":    (6, 210),
+    "codex-cross-check":    (6, 210),
     "receiving-code-review":(6, 316),
     # -- feedback loop: feeds back right to left --
     "lessons":              (6, 784),

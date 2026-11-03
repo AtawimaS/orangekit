@@ -3,6 +3,13 @@
 
 # Step 4 · 4-1: The machine verification gate and execution verification
 
+## Contents
+
+- The machine verification gate (`guide-gate.sh`)
+- Step 4-1: Execution verification (`pack-smoke.sh`)
+- Running the schema
+- Structural lint of the generated skill
+
 The generator also runs the same gate before returning, but **the report that it ran is itself a self-report** (principle 5).
 
 If you authored an axis pack, check it **first with `--pack`, before assembly** (the fan-in point of Step 2-A).
@@ -106,3 +113,12 @@ validation library, install just that in scratch and have it parse the schema co
 | An unknown key included | Which is it — passed, stripped, or rejected — and does it match the guide's description |
 
 If the result differs from the guide's description, what to fix is not the schema but **that description**.
+
+### Structural lint of the generated skill
+
+If the consumer project has `skill-enhancer`, run it on the generated guide directory too (skip it if absent — it is not a gate verdict).
+It checks `name`, description, body line count and reference contents lists against the official standard. Repair every ✗ and put warnings in the report.
+
+```bash
+L=${CLAUDE_SKILL_DIR}/../skill-enhancer/scripts/skill-lint.sh; [ -f "$L" ] && bash "$L" <guide-path>
+```

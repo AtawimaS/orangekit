@@ -3,6 +3,11 @@
 
 # Step 3-1: Generation delegation — three layers, parallel by coupling cluster
 
+## Contents
+
+- Three-layer delegation (L0 · L1 · L2)
+- Combination dependencies — the two guides are functions of each other
+
 One agent per guide writing ~2,300 lines **serially** measured 36.6 minutes. The contract discipline stays as it is
 and **only who writes layer 2** widens to the file level. The main session does not write them itself so that
 the verification in Steps 4~5 does not turn into self-grading (principle 5).
@@ -99,3 +104,59 @@ Generation rules (instruct the subagent with these verbatim):
 
    > Why the canonical source is not copied or adapted into a skill resource: a copy is a source of drift
    > cut off from plugin updates. A single card + a version stamp update is v3's distribution method.
+
+## Combination dependencies — the two guides are functions of each other
+
+**Change one axis and the other axis's guide changes too.** Measured: with the same Supabase backend,
+pairing it with Next.js centred the guide on Route Handlers · Server Actions · middleware session refresh,
+while pairing it with a React+Vite SPA centred it on Edge Functions · direct browser calls · RLS as the sole defence —
+**a completely different backend-guide** came out.
+
+The two things you must always hand the generating subagent:
+
+| Item | Source | Effect on the two guides |
+| --- | --- | --- |
+| **Where the server code lives** | `notes.serverCode` of the frontend preset | The whole "standard handler shape" slot of backend-guide. If the frontend has a server runtime, there; if not, in BaaS functions · serverless functions · a self-built server |
+| **Where the security boundary is** | `notes.securityBoundary` of the backend preset | The auth/authorization slots on both sides. With a server runtime, an application-layer check + a data-layer policy as a double defence; with an SPA, the data-layer policy is effectively the only boundary |
+| **Whether the data layer has a policy engine** | `notes.securityBoundary` · `dataModeling` of the backend preset | **The variable that splits things most.** If there is one (RLS · Security Rules), write on the premise of a double defence; if there is none (DynamoDB and the like), write on the premise that a missing application-layer ownership check is itself a data leak. Get this wrong and the guide makes the reader believe they are safe |
+| **Whether the language is TS or JS** | `techStack.frontend.language` · `notes.language` of the preset | Whether the type-standard slot lives or dies. For JS, replace that slot with JSDoc conventions · runtime schema validation, and do not include a generated-types section |
+| **Whether the client is a browser or an app** | `techStack.clientKind` (derived from `deliveryModel`) | Whether four backend-guide slots live or die. See the table below |
+| **What the product form is** | `techStack.deliveryModel` · `pwa` | Whether the offline · shell slots of frontend-guide live or die. See the table below |
+
+**Slots split by the product form (`deliveryModel`)** — the pack merely holds the slots and **the generator decides**
+**whether each is filled or left empty.** Nailing form-specific content into the pack as prose turns it into wrong guidance in every other combination.
+
+| frontend-guide slot | `web` | `web`+`pwa` | `hybrid` | `cross-platform` · `native` |
+| --- | --- | --- | --- | --- |
+| Offline · install | Empty | Service worker · manifest · offline cache · install prompt · update strategy | Owned by the shell | With no web screen axis there is no frontend-guide at all — app-guide |
+| Shell boundary | Empty | Empty | `capacitor`: shell wiring · native bridge boundary · deep links · store review · forced update / `rn-*`: **only the web side of the bridge contract** (the rest is app-guide) | — |
+
+| app-guide slot | `hybrid` + `rn-webview` | `hybrid` + `rn-native-screens` | `cross-platform` · `native` |
+| --- | --- | --- | --- |
+| Screens · navigation | A single webview container | Transition rules between native screens ↔ webview screens | The whole app |
+| Bridge contract | App-side receipt · origin verification | The same + the path by which native screens read web state | Empty |
+| Permissions · device features | Push · permissions | Push · permissions · maps · camera · location | The whole app |
+| Release | Store + what OTA can cover | The same | The same (Flutter · Swift · Kotlin have no OTA) |
+
+| backend-guide slot | `clientKind: browser` | `clientKind: app` |
+| --- | --- | --- |
+| Client auth transport | Cookie session · CORS · CSRF defence | **Bearer + secure storage** (not cookies) |
+| Idempotent ingest | Empty | **Lives** — offline batch sync is the premise. A resend must not be applied twice |
+| Push delivery | Empty | Lives (FCM/APNs) |
+| API version negotiation | Empty | Lives — because older app versions keep running |
+
+**An empty slot is the normal path.** A web project's backend-guide having no push section is not a defect
+but the result of the dimension working — forcing an empty slot full invents a requirement the project does not have.
+
+**Conflict detection — `hybrid` × `nextjs`**: a Capacitor shell carries static assets, so
+`output: 'export'` is forced and Server Actions · Route Handlers cannot be used. When this combination arrives,
+**state the constraint** in the guide and write it with the server features placed on the backend axis.
+
+**Whether a policy engine exists is not one line of wording but the premise of the whole guide.** Carrying the
+"RLS is the backup, so the application check is a double defence" wording used in a BaaS combination straight
+over to a combination with no policy engine makes it exactly the opposite guidance — the security axis of the Step 5 audit is what catches this contamination.
+
+The frontend-guide slots **data fetching · routing/auth · complete example** depend on the backend choice.
+The backend-guide slots **API endpoints · complete example** depend on the frontend choice.
+The remaining slots (styling · state management · component patterns / data access · validation · testing) close
+inside the axis — they largely hold up when the combination changes.

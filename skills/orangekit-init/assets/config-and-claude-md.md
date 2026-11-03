@@ -3,6 +3,12 @@
 
 # Step 5–6: create orangekit.config.json · CLAUDE.md
 
+## Contents
+
+- Step 5: Create orangekit.config.json
+- Step 6: Create CLAUDE.md
+
+
 ### Step 5: Create orangekit.config.json
 
 Create `orangekit.config.json` from the collected information:

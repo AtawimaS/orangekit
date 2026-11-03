@@ -554,7 +554,7 @@
 <text class="gk" x="1410" y="252" text-anchor="middle" fill="var(--g-soft)">reviewer's extra pass</text>
 <rect x="1560" y="210" width="200" height="56" rx="6" fill="var(--g-surface)" stroke="var(--g-line)" stroke-width="1.4"/>
 <rect x="1569" y="221" width="3" height="34" fill="var(--g-skill)"/>
-<text class="gn" x="1660" y="234" text-anchor="middle" fill="var(--g-skill)">codex-claude-loop</text>
+<text class="gn" x="1660" y="234" text-anchor="middle" fill="var(--g-skill)">codex-cross-check</text>
 <text class="gk" x="1660" y="252" text-anchor="middle" fill="var(--g-soft)">external model check</text>
 <rect x="1560" y="316" width="200" height="56" rx="6" fill="var(--g-surface)" stroke="var(--g-line)" stroke-width="1.4"/>
 <rect x="1569" y="327" width="3" height="34" fill="var(--g-skill)"/>
@@ -1246,7 +1246,7 @@
   <h2>Every one is attached to a stage in the graph</h2>
   <p class="say">A skill <strong>loads only when it is invoked, so it costs nothing until it is needed.</strong> Twenty-one trigger on their own when the situation matches; six wait for a <span class="badge b-cmd">/command</span>. All of them are wired to a stage, which is what lets <span class="m">doctor --usage</span> answer <strong>"has this skill ever actually been used?"</strong> — and this repository's rule is that <strong>nothing gets culled without that measurement.</strong></p>
 
-  <div class="note"><b>Only two things ever leave your machine.</b> Every other skill finishes locally. <span class="pill p-skill" style="font-size:11px">/codex-claude-loop</span> sends <b>plan text or a <span class="m">git diff</span></b> — never the whole tree — and asks every time. <span class="pill p-skill" style="font-size:11px">/image-generator</span> sends <b>only the image prompt</b>, never source, but it is <b>billed separately from any ChatGPT subscription</b> — so it shows the price before calling and records your answer in <span class="m">orangekit.config.json</span> instead of asking again. With no API key it <b>does not block</b>: it writes a prompt for you to paste into ChatGPT yourself.</div>
+  <div class="note"><b>Only two things ever leave your machine.</b> Every other skill finishes locally. <span class="pill p-skill" style="font-size:11px">/codex-cross-check</span> sends <b>plan text or a <span class="m">git diff</span></b> — never the whole tree — and asks every time. <span class="pill p-skill" style="font-size:11px">/image-generator</span> sends <b>only the image prompt</b>, never source, but it is <b>billed separately from any ChatGPT subscription</b> — so it shows the price before calling and records your answer in <span class="m">orangekit.config.json</span> instead of asking again. With no API key it <b>does not block</b>: it writes a prompt for you to paste into ChatGPT yourself.</div>
 
   <div class="filterbar">
     <input id="q" type="search" placeholder="Search by situation or name — e.g. PRD, security, review, design" aria-label="Search skills">
@@ -1282,7 +1282,7 @@
 
         <tr class="grouphead"><td colspan="3">verify · cross-check <span class="cnt">· 2</span> — <span class="why">intensity set by the reversibility class</span></td></tr>
         <tr><td><span class="pill p-skill">/receiving-code-review</span></td><td><span class="badge b-auto">auto</span></td><td><b>Vets incoming review feedback against the real code</b> before adopting it, and <b>argues back with evidence</b> where it is wrong. It never accepts blindly.</td></tr>
-        <tr><td><span class="pill p-skill">/codex-claude-loop</span></td><td><span class="badge b-auto">auto</span></td><td>Independent verification by OpenAI Codex. <b>The source leaves the machine, so it never runs without consent.</b></td></tr>
+        <tr><td><span class="pill p-skill">/codex-cross-check</span></td><td><span class="badge b-auto">auto</span></td><td>Independent verification by OpenAI Codex. <b>The source leaves the machine, so it never runs without consent.</b></td></tr>
 
         <tr class="grouphead"><td colspan="3">install · guides <span class="cnt">· 3</span> — <span class="why">seating the harness in a project</span></td></tr>
         <tr><td><span class="pill p-skill">/orangekit-init</span></td><td><span class="badge b-cmd">/command</span></td><td>First-time setup — writes <span class="m">orangekit.config.json</span> and <span class="m">CLAUDE.md</span>, and generates guides once you pick the stack.</td></tr>
