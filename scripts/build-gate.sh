@@ -81,13 +81,31 @@ _session_touched() {
       }
       return 0
     }
+    # A mention of the bare file name only — when a directory is attached (`a/index.tsx`) it counts only if that path continues into
+    # the path of this file. Otherwise `sed -n 1,20p a/index.tsx` (a read) makes `b/index.tsx`, edited by another session, look like ours.
+    function endswith(s, t) { return length(s) >= length(t) && substr(s, length(s) - length(t) + 1) == t }
+    function mention_base(s, base, full,    i, k, st, e, tok) {
+      k = 0
+      while ((i = index(substr(s, k + 1), base)) > 0) {
+        k += i; e = k + length(base) - 1
+        if (substr(s, e + 1, 1) ~ /[A-Za-z0-9_.-]/) continue
+        st = k
+        while (st > 1 && substr(s, st - 1, 1) ~ /[A-Za-z0-9_.\/~-]/) st--
+        tok = substr(s, st, e - st + 1)
+        if (tok == base) return 1                       # bare file name — loose, as before
+        if (substr(s, k - 1, 1) != "/") continue        # part of another name (`data.tsx`)
+        while (tok ~ /^(\.\.?\/)/) sub(/^\.\.?\//, "", tok)
+        if (tok == full || endswith(full, "/" tok) || endswith(tok, "/" full)) return 1
+      }
+      return 0
+    }
     BEGIN { n = split(ENVIRON["ORANGEKIT_SRC_LIST"], w, "\n")
             for (i = 1; i <= n; i++) { b[i] = w[i]; sub(/.*\//, "", b[i]) } }
     /^E\t/ { p = substr($0, 3)
              for (i = 1; i <= n; i++)
                if (!hit[i] && (p == w[i] || substr(p, length(p) - length(w[i])) == "/" w[i])) hit[i] = 1
              next }
-    /^B\t/ { for (i = 1; i <= n; i++) if (!hit[i] && (mention($0, w[i]) || mention($0, b[i]))) hit[i] = 1 }
+    /^B\t/ { for (i = 1; i <= n; i++) if (!hit[i] && (mention($0, w[i]) || mention_base($0, b[i], w[i]))) hit[i] = 1 }
     END { for (i = 1; i <= n; i++) if (hit[i]) print w[i] }'
 }
 SRC_CHANGED=$(_session_touched)

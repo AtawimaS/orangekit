@@ -287,6 +287,22 @@ run_fast() {
     ok "every grep -c is guarded"
   fi
 
+  # The last stage of a pipe that is a `while` — bash runs that loop in a subshell, so a variable or an accumulating function such as `add`
+  # changed inside it is thrown away (`… | while read t; do add "$t"; done` — why handoff's "remaining work" was empty, consumer report B8).
+  # Allowed shape: `while …; do …; done < <(pipeline)`. Counted only when the loop body assigns a variable (`x=` · `x+=`) or calls `add`.
+  local pwl="" nw=0
+  for f in scripts/*.sh; do
+    [ -f "$f" ] || continue
+    if { code_lines "$f" | grep -E '\|[[:space:]]*while[[:space:]].*;[[:space:]]*do[[:space:]]+(add[[:space:]]|[A-Za-z_][A-Za-z0-9_]*\+?=)' || true; } | grep -q .; then
+      pwl="$pwl $(basename "$f")"; nw=$((nw+1))
+    fi
+  done
+  if [ "$nw" -gt 0 ]; then
+    bad "a pipe-final while changes state: ${nw} files" "$pwl — it runs in a subshell and the result is thrown away. Use done < <(…) process substitution"
+  else
+    ok "no pipe-final while loop changes state"
+  fi
+
   # A non-ASCII byte right after `$name` — macOS /bin/bash 3.2 in a UTF-8 locale reads that byte as part of the name and
   # dies with unbound variable under `set -u` (`"$dmaj→$lmaj"`). With an empty LANG in the developer's shell it does not
   # reproduce, so it happened only in users' terminals. Every shell script is a target — comments are excluded.
@@ -3065,6 +3081,21 @@ $bfill" --arg p "$up/src/cfg.ts" '{hook_event_name:"PreToolUse",tool_name:"Write
     printf '%s' "$out" | grep -q '"continue"[[:space:]]*:[[:space:]]*false' \
       && ok "build-gate: file changed with Bash (sed -i) + no verification → blocked" \
       || bad "build-gate: let a file changed with Bash pass with no verification" "a path mentioned in a Bash command is not counted as this session's"
+    # The same name in a **different directory** that was only read is no trace of this file (B10) — but a continuing path still counts
+    local b10cmd b10want
+    for b10cmd in 'sed -n 1,5p lib/Card.tsx|pass' 'sed -i "" s/a/b/ ./src/Card.tsx|block'; do
+      printf '%s\n' "$(jq -nc --arg c "${b10cmd%|*}" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:$c}}]}}')" > "$vt"
+      b10want=${b10cmd##*|}
+      out=$(printf '{"stop_hook_active":false,"transcript_path":"%s"}' "$vt" \
+            | CLAUDE_PLUGIN_ROOT="$cache" CLAUDE_PROJECT_DIR="$up" bash "$cache/scripts/build-gate.sh" 2>/dev/null) || true
+      if printf '%s' "$out" | grep -q '"continue"[[:space:]]*:[[:space:]]*false'; then
+        [ "$b10want" = block ] && ok "build-gate: '${b10cmd%|*}' → this session's file → blocked" \
+          || bad "build-gate: blocked over a read of a same-named file in another directory" "a bare file name match counts — false block with parallel sessions"
+      else
+        [ "$b10want" = pass ] && ok "build-gate: '${b10cmd%|*}' → a different path → no block" \
+          || bad "build-gate: missed an edit whose path continues into the file" "the narrowed match let a real edit through — blocking power lost"
+      fi
+    done
   else
     warn "large input not verified — jq missing" "undecidable is not folded into pass"
   fi

@@ -134,6 +134,9 @@ _owners_of() {   # $1 project-relative path  $2 1=new file 0=existing → lines 
   fi
   return 0
 }
+KG_NOTES=""
+_kg_note() { KG_NOTES+="${KG_NOTES:+$'\n\n'}$1"; }   # collect, do not print one JSON per target — hook stdout must be a single JSON object
+_kg_flush() { [ -z "$KG_NOTES" ] || orangekit_emit_context PreToolUse "$KG_NOTES"; KG_NOTES=""; }
 _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → exit 2 if it blocks
   local rel="$1" isnew="$2" n re names=() kinds=() res=() unread=() again=() _k _v _l seen _ok _on _or
   while IFS="$(printf '\t')" read -r _ok _on _or; do
@@ -146,11 +149,13 @@ _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → 
   sid=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
   if [ -z "$tp" ] || [ ! -f "$tp" ] || ! command -v jq >/dev/null 2>&1; then
     list=$(for i in "${!names[@]}"; do [ "${kinds[$i]}" = card ] && printf '  - Read .claude/rules/%s\n' "${names[$i]}" || printf '  - skill /%s\n' "${names[$i]}"; done)
-    orangekit_emit_context PreToolUse "Load these before writing \`$rel\` (it cannot be determined whether they were loaded in this session, so this does not block):
+    _kg_note "Load these before writing \`$rel\` (it cannot be determined whether they were loaded in this session, so this does not block):
 $list"
     return 0
   fi
-  local reads; reads=$(_session_reads "$tp")
+  # Read the transcript once per hook call — re-reading it for every write target costs ~2 s per target in a long session (consumer report B7)
+  if [ -z "${KG_READS_DONE:-}" ]; then KG_READS=$(_session_reads "$tp"); KG_READS_DONE=1; fi
+  local reads=$KG_READS
   state="$(orangekit_state_dir)/knowledge-gate.${sid:-nosession}"
   for i in "${!names[@]}"; do
     n=${names[$i]}; re=${res[$i]}; seen=0
@@ -186,7 +191,7 @@ $list"
   fi
   if [ ${#again[@]} -gt 0 ]; then
     list=$(for i in "${again[@]}"; do printf '  - %s\n' "${names[$i]}"; done)
-    orangekit_emit_context PreToolUse "You are writing \`$rel\` with rules or skills still not loaded — this was announced once in this session, so it does not block:
+    _kg_note "You are writing \`$rel\` with rules or skills still not loaded — this was announced once in this session, so it does not block:
 $list"
   fi
   return 0
@@ -204,6 +209,7 @@ if [ "${1:-}" = "--owning" ]; then
 fi
 if [ "$TOOL_NAME" = "Write" ] && [ -n "$FILE_PATH" ] && [ ! -e "$FILE_PATH" ]; then
   _knowledge_gate "$(_gate_rel "$FILE_PATH" "$ORANGEKIT_ROOT")" 1
+  _kg_flush
 fi
 if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
   _gcwd=$(orangekit_field "$INPUT" '.cwd'); _gcmd=$(orangekit_field "$INPUT" '.tool_input.command')
@@ -212,6 +218,7 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
     _gabs=$_gt; case "$_gabs" in /*) ;; *) _gabs="${_gcwd:-$ORANGEKIT_ROOT}/${_gabs#./}" ;; esac
     if [ -e "$_gabs" ]; then _knowledge_gate "$(_gate_rel "$_gabs")" 0; else _knowledge_gate "$(_gate_rel "$_gabs")" 1; fi
   done < <(_bash_targets "$_gcmd")
+  _kg_flush
 fi
 
 # ══════════════════════════════════════════════════════════════════════

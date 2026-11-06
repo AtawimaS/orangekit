@@ -61,9 +61,8 @@ if [ -d "$ORANGEKIT_ROOT/dev/active" ]; then
       add "- progress ${DONE}/$((DONE+TODO))"
       if [ "$TODO" -gt 0 ]; then
         add "- remaining work:"
-        { grep '^\s*- \[ \]' "$TF" 2>/dev/null || true; } | head -5 | sed 's/^\s*- \[ \]/  -/' | while IFS= read -r t; do
-          printf '%s\n' "$t"
-        done | while IFS= read -r t; do add "$t"; done
+        # The last stage of a pipe runs in a subshell, so add() would only change a copy of OUT — process substitution keeps the loop in this shell
+        while IFS= read -r t; do add "$t"; done < <({ grep '^\s*- \[ \]' "$TF" 2>/dev/null || true; } | head -5 | sed 's/^\s*- \[ \]/  -/')
       fi
       add "- file: \`${TF#$ORANGEKIT_ROOT/}\`"
     fi
@@ -81,7 +80,8 @@ if [ "$EVENT" = "SessionEnd" ]; then
     TS=$(date -u '+%Y%m%d-%H%M%S')
     printf '%s\n' "$OUT" > "$HD/${TS}.md" 2>/dev/null || true
     # Keep only the 10 most recent (prevents unbounded growth)
-    { ls -1t "$HD"/*.md 2>/dev/null || true; } | tail -n +11 | while IFS= read -r old; do rm -f "$old"; done
+    # Rotate only the YYYYMMDD-HHMMSS.md files this hook writes — never delete a note someone placed by hand
+    { ls -1t "$HD"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].md 2>/dev/null || true; } | tail -n +11 | while IFS= read -r old; do rm -f "$old"; done
   fi
 fi
 
