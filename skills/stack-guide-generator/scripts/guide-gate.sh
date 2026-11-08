@@ -56,22 +56,32 @@ trap 'rm -rf "$TMP"' EXIT
 # Keeps only lines inside a code fence that are not comments and are not in an anti-pattern (❌/Bad) span.
 # Both idioms count as markers: `// ❌` / `// ✅`, `// Bad` / `// Good`.
 # If the prose line right before a fence is ❌/Bad, the whole fence starts as an anti-pattern.
-# Output: <file>\t<line number>\t<text>\t<fence ID>
+# Output: <file>\t<line number>\t<text>\t<fence ID>\t<declared code file>
 # The 4th column exists for fence-level checks (security shape·duplicate fence). The first 3 columns are unchanged, so
 # existing `cut -f3` consumers are unaffected.
+# The 5th column is the code file the fence says it is: a `<!-- file: x -->` line right before it, or a first line that is a
+# path comment (`// src/test/env.ts — …` · `# tests/conftest.py`). Empty when the fence names none. Policy exemptions
+# are declared by code file (`src/test/env.ts`), so they are enforced by code file too (_policy_fence_filter).
 codelines() {
   awk '
+    function declpath(s,   m) {
+      if (match(s, /<!--[[:space:]]*file:[[:space:]]*[^ >]+/)) { m=substr(s,RSTART,RLENGTH); sub(/.*file:[[:space:]]*/,"",m); return m }
+      return ""
+    }
     # ❌/✅ outrank the English words as markers. The word test has to exclude _ and digits at its
     # boundary so contract identifiers (BAD_SHAPE·BAD_REQUEST) are not mistaken for anti-pattern markers —
     # if they are, code extraction switches off from there and every later check is silently skipped (a miss).
     function isbad(s)  { return (index(s,"❌")>0 || (index(s,"✅")==0 && s ~ /(^|[^A-Za-z0-9_])(Bad|BAD)([^A-Za-z0-9_]|$)/)) }
     function isgood(s) { return (index(s,"✅")>0 || (index(s,"❌")==0 && s ~ /(^|[^A-Za-z0-9_])(Good|GOOD)([^A-Za-z0-9_]|$)/)) }
     function iscomment(s) { return (s ~ /^[[:space:]]*(\/\/|#|\*|\/\*|--)/) }
-    FNR==1 { inf=0; pol=1; lastprose=""; fn=0 }
-    /^[[:space:]]*```/ { if (!inf) { inf=1; fn++; pol = isbad(lastprose) ? 0 : 1 } else { inf=0 }; next }
-    !inf { if ($0 ~ /[^[:space:]]/) lastprose=$0; next }
+    FNR==1 { inf=0; pol=1; lastprose=""; pdecl=""; fn=0 }
+    /^[[:space:]]*```/ { if (!inf) { inf=1; fn++; fl=0; pol = isbad(lastprose) ? 0 : 1; decl=pdecl } else { inf=0; pdecl="" }; next }
+    !inf { if ($0 ~ /[^[:space:]]/) { lastprose=$0; pdecl=declpath($0) }; next }
+    { fl++ }
+    fl==1 && decl=="" && $0 ~ /^[[:space:]]*(\/\/|#|--)[[:space:]]*[A-Za-z0-9_.\/-]+\.[A-Za-z]+([[:space:]]|$)/ {
+      decl=$0; sub(/^[[:space:]]*(\/\/|#|--)[[:space:]]*/,"",decl); sub(/[[:space:]].*/,"",decl) }
     iscomment($0) { if (isbad($0)) pol=0; else if (isgood($0)) pol=1; next }
-    pol { print FILENAME "\t" FNR "\t" $0 "\t" FILENAME "#" fn }
+    pol { print FILENAME "\t" FNR "\t" $0 "\t" FILENAME "#" fn "\t" decl }
   ' "$@"
 }
 
@@ -487,6 +497,11 @@ check_stamp() {
     [ -n "$stamp" ] && { case "$stamp" in *pkgs=*) ok "the stamp carries pkgs=";; *) warn "the stamp has no pkgs=" "the version-drift check gets nothing to compare against";; esac; }
   else
     [ -n "$base" ] && ok "verification baseline present" || warn "verification baseline (orangekit-guide-baseline) missing" "for a pre-built guide the baseline is the only basis for judging staleness"
+    # An installed copy (assembly.json beside it) always carries a stamp: the installer writes `assembled`, the generator
+    # `generated`. A hub copied by hand had neither, and guide-freshness could not read its packages (consumer run)
+    if [ -f "$G/assembly.json" ] && [ -z "$stamp" ]; then
+      bad "installed guide has no orangekit-guide stamp" "write the generation stamp (Step 7) — drift checks cannot read this guide"
+    fi
   fi
 
   local decl; decl="$stamp$base"
@@ -576,7 +591,16 @@ check_pack_iface() {
     > "$TMP/req.tsv"
 
   local n; n=$(num "$(grep -c . "$TMP/req.tsv" | tr -d ' ')")
-  [ "$n" -eq 0 ] && { warn "could not read requires entries from the pack ledger" "format: | \`symbol\` | kind | shape | reason |"; return; }
+  if [ "$n" -eq 0 ]; then
+    # A pack can declare 0 requires on purpose (the fastify pack since 3.35.0: the wire contract and auth variants own the HTTP layer).
+    # An empty table under its header, or an explicit "None." / "Empty" / "there are 0", is an answer, not a parse failure
+    if awk '/^## requires/{f=1;next} /^## /{f=0} f' "$led" | grep -qiE '^\|[[:space:]]*symbol[[:space:]]*\||^none\b|^\*\*empty|there are 0'; then
+      ok "the pack declares 0 requires — nothing for the combination to satisfy"
+    else
+      warn "could not read requires entries from the pack ledger" "format: | \`symbol\` | kind | shape | reason |"
+    fi
+    return
+  fi
 
   local sym kind miss=0 skipped=0
   while IFS=$'\t' read -r sym kind; do
@@ -648,12 +672,12 @@ $f"
     [ -z "$targets" ] && { rev "policy '$id' has 0 target files" "scope=$scope except=$except — check the scope"; continue; }
 
     # shellcheck disable=SC2086
-    hits=$(codelines $targets | cut -f3 | grep -cE "$rx" 2>/dev/null || true)
+    hits=$(codelines $targets | _policy_fence_filter "$except" | cut -f3 | grep -cE "$rx" 2>/dev/null || true)
     hits=$(num "$hits")
     if [ "$verdict" = "forbid" ]; then
       if [ "$hits" -gt 0 ]; then
         # shellcheck disable=SC2086
-        bad "policy violation '$id' — ${hits} forbidden pattern hits" "$(codelines $targets | grep -E "$rx" | head -2 | awk -F'\t' '{printf "%s:%s ", substr($1,match($1,/[^\/]*$/)), $2}')"
+        bad "policy violation '$id' — ${hits} forbidden pattern hits" "$(codelines $targets | _policy_fence_filter "$except" | grep -E "$rx" | head -2 | awk -F'\t' '{printf "%s:%s ", substr($1,match($1,/[^\/]*$/)), $2}')"
         viol=$((viol+1))
       else pass=$((pass+1)); fi
     else
@@ -687,6 +711,40 @@ _parse_policies() {
         # An 8-column table (with the new counterexample column) has NF>=10. A 7-column table yields an empty counterexample.
         cx = (NF>=10) ? $8 : ""
         if ($2!="") print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"ex"\t"has"\t"cx }' > "$2"
+}
+
+# Drops code lines from fences whose declared code file is exempt. The exemption column holds two kinds of entry:
+#   `testing.md`                                       a whole guide file (matched by _policy_targets, as before)
+#   `src/test/*` · `*.test.ts` · `global-setup.ts`     a code file, matched against the fence's declared path (5th column)
+# Why both: a policy's description names its exceptions as code files ("where a test injects the DB: src/test/env.ts"), but
+# the md-only column could exempt only the whole testing.md. A seam or hub fence for the same code file then FAILed, and the
+# generator rewrote correct test code to satisfy the gate (field report, 1.4.2). `*` stays within one path segment; a bare
+# name also matches under any directory (`global-setup.ts` ↔ `src/test/global-setup.ts`). A fence that declares no file is
+# never exempt.
+# The patterns reach awk as **one comma-joined line**: BSD awk (macOS) rejects a -v value that holds a newline ("newline in
+# string"), and a first version joined them with newlines — awk printed nothing, every hit vanished, and the policy passed
+# everything (fail-open, caught on macOS only). If awk still refuses the value, nothing is exempted — fail closed.
+_policy_fence_filter() { # stdin=codelines rows · $1=exemption column
+  local pats="" e rest="${1:-}"
+  # Split on commas by parameter expansion — `for e in $(…)` would glob `src/test/*` against the current directory
+  while [ -n "$rest" ]; do
+    e=${rest%%,*}
+    if [ "$e" = "$rest" ]; then rest=""; else rest=${rest#*,}; fi
+    e=$(printf '%s' "$e" | tr -d ' ')
+    case "$e" in ""|"—"|"-"|*.md) continue ;; esac
+    pats="${pats:+$pats,}$e"
+  done
+  if [ -z "$pats" ]; then cat; return 0; fi
+  awk -v pats="$pats" 'BEGIN { exit 0 }' </dev/null >/dev/null 2>&1 || { cat; return 0; }
+  awk -F'\t' -v pats="$pats" '
+    BEGIN { n = split(pats, P, ",") }
+    function glob2re(g,   r) { r = g; gsub(/[.+^$(){}|\[\]\\]/, "\\\\&", r); gsub(/\*/, "[^/]*", r); gsub(/\?/, ".", r); return r }
+    {
+      d = $5; skip = 0
+      if (d != "") for (i = 1; i <= n; i++) { re = glob2re(P[i]); if (d ~ ("^" re "$") || d ~ ("/" re "$")) { skip = 1; break } }
+      if (!skip) print
+    }'
+  return 0
 }
 
 # The target file list of one policy. If packfiles is empty, scope=seam ends up with 0 targets.
@@ -1573,12 +1631,12 @@ check_pack_policies() {
       continue
     fi
     # shellcheck disable=SC2086
-    hits=$(num "$(codelines $targets | cut -f3 | grep -cE "$rx" 2>/dev/null || true)")
+    hits=$(num "$(codelines $targets | _policy_fence_filter "$except" | cut -f3 | grep -cE "$rx" 2>/dev/null || true)")
     if [ "$verdict" = "forbid" ]; then
       if [ "$hits" -gt 0 ]; then
         # shellcheck disable=SC2086
         bad "the pack violates its own policy '$id' — ${hits} forbidden pattern hits" \
-            "$(codelines $targets | grep -E "$rx" | head -2 | awk -F'\t' '{printf "%s:%s ", substr($1,match($1,/[^\/]*$/)), $2}')"
+            "$(codelines $targets | _policy_fence_filter "$except" | grep -E "$rx" | head -2 | awk -F'\t' '{printf "%s:%s ", substr($1,match($1,/[^\/]*$/)), $2}')"
         viol=$((viol+1))
       else pass=$((pass+1)); fi
     else
@@ -2088,6 +2146,7 @@ run_self_test() {
   _fx_assert "$fx/fence/sample-backend-guide"     1 "unclosed code fence"  --generated
   _fx_assert "$fx/section/sample-backend-guide"   1 "required section missing"        --generated
   _fx_assert "$fx/nostamp/sample-backend-guide"   1 "generation stamp missing"      --generated
+  _fx_assert "$fx/nostamp-installed/sample-backend-guide" 1 "installed guide has no orangekit-guide stamp"
   _fx_assert "$fx/leak/sample-backend-guide"      1 "cross-leak keyword"      --generated --forbid prisma
   _fx_assert "$fx/leakword/sample-backend-guide"  0 "an ordinary English word (cannot express) is not a leak" --generated --forbid express
   _fx_assert "$fx/leakcap/sample-backend-guide"   1 "the product spelling (Express) is still a leak" --generated --forbid express
@@ -2100,9 +2159,19 @@ run_self_test() {
   cp "$fx/pg/backend/fxpack/policies.md" "$fx/pg/backend/fxpack/.keep-policies" 2>/dev/null || true
   _fx_assert "$fx/clean/sample-backend-guide" 0 "pack requires satisfied + generated excluded" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md
   _fx_assert "$fx/clean/sample-backend-guide" 1 "pack requires unsatisfied"        --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger.md
+  # WARN does not change the exit code, so the verdict is read from the output
+  local _o
+  _o=$(bash "$0" --guide "$fx/clean/sample-backend-guide" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-empty.md 2>&1)
+  if printf '%s' "$_o" | grep -q 'declares 0 requires' && ! printf '%s' "$_o" | grep -q 'could not read requires'; then ok "a pack that declares 0 requires is not reported as unreadable"
+  else bad "a pack that declares 0 requires is reported as unreadable" "the gate warned 'could not read requires entries' for an empty requires section"; fi
+  _o=$(bash "$0" --guide "$fx/clean/sample-backend-guide" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-noreq.md 2>&1)
+  if printf '%s' "$_o" | grep -q 'could not read requires'; then ok "a ledger with no requires section still warns (not silenced)"
+  else bad "a ledger with no requires section no longer warns" "the empty-requires allowance swallowed a missing section"; fi
   _fx_assert "$fx/clean/sample-backend-guide" 1 "pack policy violation (forbid)"     --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md --pack-policies-name policies-forbid.md
   _fx_assert "$fx/clean/sample-backend-guide" 1 "pack policy violation (require absent)" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md --pack-policies-name policies-require-missing.md
   _fx_assert "$fx/clean/sample-backend-guide" 0 "the policy exception column actually takes effect"  --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md --pack-policies-name policies-excepted.md
+  _fx_assert "$fx/envok/sample-backend-guide"  0 "a seam fence that declares an exempt code file (src/test/*) passes the env policy" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md --pack-policies-name policies-env.md
+  _fx_assert "$fx/envbad/sample-backend-guide" 1 "the same env read in an undeclared fence is still a violation" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-ok.md --pack-policies-name policies-env.md
 
   # ── standalone axis pack check (v3.13.0) ──
   # A pack could not be verified without a seam. --pack is that place, and it is the fan-in point of parallel authoring.
@@ -3198,6 +3267,17 @@ FXL3
   cp -R "$fx/clean/sample-backend-guide" "$fx/leakword/" && cp -R "$fx/clean/sample-backend-guide" "$fx/leakcap/"
   printf '\nThe type system cannot express this invariant, so the test pins it.\n' >> "$fx/leakword/sample-backend-guide/resources/f.md"
   printf '\nMiddleware order is the same as in Express.\n' >> "$fx/leakcap/sample-backend-guide/resources/f.md"
+  # The same hub as an installed copy (assembly.json beside it), checked without --generated — how a hand-built hub slipped through
+  mkdir -p "$fx/nostamp-installed" && cp -R "$fx/nostamp/sample-backend-guide" "$fx/nostamp-installed/" \
+    && printf '{}\n' > "$fx/nostamp-installed/sample-backend-guide/assembly.json"
+  # Env exemptions by declared code file (field report, 1.4.2): a seam's test-setup fence reads process.env exactly as the
+  # policy description allows, yet only whole md files could be exempted. Three shapes — a path comment, a `<!-- file: -->`
+  # marker, and the same read with no declared file (must still FAIL — the exemption may not leak to undeclared fences)
+  mkdir -p "$fx/envok" "$fx/envbad"
+  cp -R "$fx/clean/sample-backend-guide" "$fx/envok/" && cp -R "$fx/clean/sample-backend-guide" "$fx/envbad/"
+  printf '\n```ts\n// src/test/env.ts — injects the isolated DB before the app loads\nprocess.env.DATABASE_URL = TEST_URL\n```\n' >> "$fx/envok/sample-backend-guide/resources/b.md"
+  printf '\n<!-- file: src/test/global-setup.ts -->\n```ts\nconst url = process.env.TEST_DATABASE_URL\n```\n' >> "$fx/envok/sample-backend-guide/resources/c.md"
+  printf '\n```ts\n// src/test/env.ts\nprocess.env.DATABASE_URL = TEST_URL\n```\n\n```ts\nconst url = process.env.DATABASE_URL\n```\n' >> "$fx/envbad/sample-backend-guide/resources/b.md"
 
   # ── pack/seam fixtures (the new surface that appeared in v3.12.0) ──
   # Shipping the axis pack and the seam separately creates two new classes of defect:
@@ -3224,6 +3304,18 @@ FXLED
 | `SomeGeneratedType` | generated | a tool artifact | to prove the check exclusion |
 FXLEDOK
 
+  # A pack that declares 0 requires on purpose (empty table, or an explicit "None."), and one with no requires section at all
+  cat > "$pk/ledger-empty.md" <<'FXLEDE'
+## requires — the seam must supply them
+None. The pack owns the whole layer.
+FXLEDE
+  cat > "$pk/ledger-noreq.md" <<'FXLEDN'
+## provides
+| symbol | kind |
+| --- | --- |
+| `connect` | project |
+FXLEDN
+
   cat > "$pk/policies.md" <<'FXPOL'
 ## Machine checks
 | id | verdict | scope | regex | exception file | proof example | counterexample | description |
@@ -3244,6 +3336,14 @@ FXPOLV
 | --- | --- | --- | --- | --- | --- | --- |
 | `must-have-graphql` | require | guide | `from 'graphql'` | — | `import { gql } from 'graphql'` | for the block proof |
 FXPOLR
+
+  cat > "$pk/policies-env.md" <<'FXPOLENV'
+## Machine checks
+| id | verdict | scope | regex | exception file | proof example | counterexample | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `zod-present` | require | guide | `from 'zod'` | — | `import { z } from 'zod'` | `import { v } from 'valibot'` | keeps the base fixture valid |
+| `env-single-entry` | forbid | guide | `process\.env` | `testing.md, src/test/*` | `const url = process.env.DATABASE_URL` | `const { PORT } = process.env` | a code-file exemption covers only fences that declare that file |
+FXPOLENV
 
   cat > "$pk/policies-excepted.md" <<'FXPOLE'
 ## Machine checks

@@ -1,0 +1,70 @@
+# The plugin's hooks run under bash on every OS Claude Code supports: macOS (/bin/bash 3.2 · BSD tools),
+# Linux (GNU tools · mawk · procps) and Windows (Git Bash · MSYS). A suite that only ever runs on one of them lets the
+# other two break silently — CRLF checkouts, GNU `stat -f`, the Store python3 alias and BSD `awk -v` all did.
+# The Windows runner keeps git's core.autocrlf=true, so the checkout itself is the CRLF test that .gitattributes answers.
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Environment
+        run: |
+          bash --version | head -1
+          jq --version
+          python3 --version || python --version
+          git config --get core.autocrlf || echo "core.autocrlf unset"
+
+      - name: Shipped scripts are LF after checkout
+        run: |
+          crlf=$(git ls-files '*.sh' | while IFS= read -r f; do grep -l "$(printf '\r')" "$f" 2>/dev/null; done)
+          [ -z "$crlf" ] || { echo "CRLF in: $crlf"; exit 1; }
+
+      - name: doctor --default
+        run: bash scripts/doctor.sh --default
+      - name: doctor --self-test
+        run: bash scripts/doctor.sh --self-test
+      - name: doctor --consumer
+        run: bash scripts/doctor.sh --consumer
+      - name: skill-lint
+        run: |
+          bash skills/skill-enhancer/scripts/skill-lint.sh --self-test
+          bash skills/skill-enhancer/scripts/skill-lint.sh skills/*/ marketing/skills/*/ harness/skills/*/
+      - name: orangekit-update --self-test
+        run: bash skills/orangekit-update/scripts/orangekit-update.sh --self-test
+      - name: image-gen --self-test
+        run: bash skills/image-generator/scripts/image-gen.sh --self-test
+      - name: guide-gate --self-test
+        run: bash skills/stack-guide-generator/scripts/guide-gate.sh --self-test
+      - name: pack-smoke --self-test
+        run: bash skills/stack-guide-generator/scripts/pack-smoke.sh --self-test
+      - name: pack-refresh --self-test
+        run: bash harness/skills/pack-refresh/scripts/pack-refresh.sh --self-test
+      - name: routing-eval --self-test
+        run: bash harness/skills/harness-evaluation/scripts/routing-eval.sh --self-test
+
+      # Measurement, not a gate: security-check spawns ~70–90 processes per Bash call (measured on macOS), and process
+      # creation is far slower under Git Bash. The hook timeout is 15s — past it the command runs unchecked
+      - name: Hook latency (security-check, typical Bash calls)
+        run: |
+          p="$RUNNER_TEMP/latency" && mkdir -p "$p" && cd "$p" && git init -q
+          TIMEFORMAT='%R s'
+          for c in "git status" "npm test" "ls -la && cat package.json | head -20"; do
+            printf '%-40s ' "$c"
+            { time (jq -nc --arg c "$c" --arg cwd "$p" '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},cwd:$cwd,session_id:"ci"}' \
+                | CLAUDE_PLUGIN_ROOT="$GITHUB_WORKSPACE" CLAUDE_PROJECT_DIR="$p" bash "$GITHUB_WORKSPACE/scripts/security-check.sh" >/dev/null 2>&1); } 2>&1
+          done

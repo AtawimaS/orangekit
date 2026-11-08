@@ -318,6 +318,33 @@ run_fast() {
     ok "every variable expansion ends on ASCII (bash 3.2 safe)"
   fi
 
+  # The Windows resolver block is copied, not sourced (installers and checkers do not source common.sh) — a copy is a drift
+  # source, so the three copies are compared here
+  local wr wr0="" wrf=""
+  for f in scripts/lib/common.sh scripts/install-guide.sh skills/image-generator/scripts/image-gen.sh; do
+    wr=$(awk '/resolve Python, strip CRLF/{f=1} f{print} f&&/^esac$/{exit}' "$f" 2>/dev/null)
+    [ -z "$wr" ] && { wrf="$wrf $f(missing)"; continue; }
+    if [ -z "$wr0" ]; then wr0=$wr; elif [ "$wr" != "$wr0" ]; then wrf="$wrf $f"; fi
+  done
+  [ -z "$wrf" ] && ok "Windows Python/jq resolver is identical in its 3 copies" \
+    || bad "Windows resolver copies drifted:$wrf" "keep scripts/lib/common.sh · install-guide.sh · image-gen.sh identical"
+
+  # CRLF line endings in a shipped text file — Git for Windows defaults to core.autocrlf=true, and a checkout made that
+  # way turns `fi` into `fi\r`: every hook dies with "command not found" and an agent's frontmatter stops parsing.
+  # Measured on a fork checked out on Windows and run on macOS: self-test 54 pass · 50 fail, security-check exit 2 on
+  # every call. .gitattributes pins eol=lf for checkouts; this proves no file slipped past it (an archive, a copy, an editor).
+  local crlf="" cr; cr=$(printf '\r')
+  while IFS= read -r f; do
+    LC_ALL=C grep -q "$cr" "$f" 2>/dev/null && crlf="$crlf$f"$'\n'
+  done < <(find scripts hooks agents rules skills harness marketing templates presets schema references \
+             \( -name '*.sh' -o -name '*.md' -o -name '*.json' -o -name '*.jsonl' -o -name '*.py' -o -name '*.hbs' \) \
+             -type f 2>/dev/null || true)
+  if [ -n "$crlf" ]; then
+    bad "CRLF line endings: $(grep -c . <<<"$crlf") files" "$(head -3 <<<"$crlf" | tr '\n' ' ')— bash dies on the \\r. Convert to LF (git add --renormalize .)"
+  else
+    ok "every shipped script and document uses LF line endings"
+  fi
+
   # git calls that do not verify HEAD — exit 128 in a repo with 0 commits (right after git init).
   # A new project's first session is exactly that state. Check first with rev-parse -q --verify HEAD.
   local gh="" n=0
@@ -1774,6 +1801,7 @@ run_self_test() {
     "PreToolUse-bash-filter-branch.json:git history rewrite:git history rewrite / mirror push"
     "PreToolUse-bash-force-push-main.json:force push to a shared branch:force push to a shared branch"
     "PreToolUse-bash-force-push-plus.json:+refspec force push (bypass attempt):force push to a shared branch"
+    "PreToolUse-bash-force-push-upper.json:GIT push (case-insensitive filesystem runs it; the hook used to exit 1 and not block):force push to a shared branch"
     "PreToolUse-bash-push-delete-main.json:remote deletion of a shared branch:remote deletion of a shared branch"
     "PreToolUse-secret-github-pat.json:GitHub PAT:hardcoded GitHub Personal Access Token"
     "PreToolUse-secret-github-oauth.json:GitHub OAuth token:hardcoded GitHub token"
@@ -2381,6 +2409,8 @@ FXP
         'unguarded grep -c' 'cat "$T/../plant-grepc" >> "$T/scripts/guarded.sh"'
       _fx_static_case "$sfx" var-nonascii 'scripts/guarded.sh' 'a→' \
         'non-ASCII after' 'cat "$T/../plant-arrow" >> "$T/scripts/guarded.sh"'
+      _fx_static_case "$sfx" crlf-script 'scripts/crlf.sh' "$(printf '\r')" \
+        'CRLF line endings' 'printf "#!/bin/bash\\r\\nexit 0\\r\\n" > "$T/scripts/crlf.sh"'
 
       _fx_static_case "$sfx" always-rule   'rules/workflow-routing.md' '^paths:' \
         "no always-loaded rule card" 'printf -- "---\npaths:\n  - \"src/**\"\n---\n" | cat - "$T/rules/workflow-routing.md" > "$T/r.tmp" && mv "$T/r.tmp" "$T/rules/workflow-routing.md"'
@@ -2593,7 +2623,138 @@ FXP
     rm -rf "$rt"
   fi
 
+  sec "error record for /orangekit-feedback"
+  local ef efl efr
+  ef=$(mktemp -d 2>/dev/null) || ef=""
+  if [ -z "$ef" ]; then
+    warn "failed to create a temporary directory" "error record fixture skipped"
+  else
+    # ① a failing hook writes where it failed (line + command), not only the exit code
+    ORANGEKIT_STATE_DIR="$ef" ORANGEKIT_ROOT="$ef" bash -c \
+      'source "$1"; ORANGEKIT_HOOK_NAME=fx-hook; false' _ "$ROOT/scripts/lib/common.sh" >/dev/null 2>&1 || true
+    efl=$(grep '^fx-hook|' "$ef/hookrun.log" 2>/dev/null | tail -1)
+    case "$efl" in
+      *'|1|line '*': false') ok "a failing hook records its line and command for the report" ;;
+      *) bad "a failing hook left no usable error record (got '${efl}')" "/orangekit-feedback would have nothing to fill in" ;;
+    esac
+    # ② only failures after the previous session are reported — an old, fixed failure does not come back
+    {
+      printf 'session-brief|t1|r|0\n'
+      printf 'build-gate|t2|r|1|line 5: old-failure\n'
+      printf 'session-brief|t3|r|0\n'
+      printf 'handoff|t4|r|3|line 9: new-failure\n'
+      printf 'session-brief|t5|r|0\n'
+    } > "$ef/window.log"
+    efr=$(bash -c 'source "$1"; orangekit_recent_failures "$2"' _ "$ROOT/scripts/lib/common.sh" "$ef/window.log" 2>/dev/null || true)
+    case "$efr" in
+      *new-failure*) case "$efr" in
+                       *old-failure*) bad "an error from an earlier session is reported again" "the warning would never clear" ;;
+                       *) ok "only errors since the last session are reported (an old one does not come back)" ;;
+                     esac ;;
+      *) bad "a new error since the last session is not reported (got '${efr}')" ;;
+    esac
+    rm -rf "$ef"
+  fi
+
+  sec "feedback drafts at session start"
+  # ③ a new hook error is drafted as a report; one already sent is not drafted again (one run proves both)
+  local fdp fdo fds fdn
+  fdp=$(mktemp -d 2>/dev/null) || fdp=""
+  if [ -z "$fdp" ]; then
+    warn "failed to create a temporary directory" "feedback draft fixture skipped"
+  else
+    mkdir -p "$fdp/.claude/.orangekit/feedback-drafts/sent"
+    printf 'session-brief|t1|x|0\nhandoff|t2|x|3|line 9: sent-before\nbuild-gate|t3|x|1|line 40: brand-new\n' \
+      > "$fdp/.claude/.orangekit/hookrun.log"
+    fds=$(printf '%s' 'handoff (exit 3: line 9: sent-before)' | cksum | cut -d' ' -f1)
+    : > "$fdp/.claude/.orangekit/feedback-drafts/sent/$fds.md"
+    # The self-test exports its own ORANGEKIT_STATE_DIR — point this run at the fixture's state folder instead
+    fdo=$(ORANGEKIT_STATE_DIR="$fdp/.claude/.orangekit" ORANGEKIT_ROOT="$fdp" CLAUDE_PROJECT_DIR="$fdp" \
+          bash scripts/session-brief.sh <<< '{}' 2>/dev/null || true)
+    fdn=$(num "$(ls "$fdp/.claude/.orangekit/feedback-drafts"/*.md 2>/dev/null | wc -l)")
+    if [ "$fdn" -eq 1 ] && grep -q 'brand-new' "$fdp/.claude/.orangekit/feedback-drafts"/*.md 2>/dev/null \
+       && grep -q 'Bug report drafted: build-gate' <<< "$fdo"; then
+      ok "a new hook error is drafted and announced; one already sent is not drafted again"
+    else
+      bad "feedback drafts: $fdn draft(s), banner $(grep -c 'Bug report drafted' <<< "$fdo")" \
+          "expected exactly the new error drafted and announced, and the sent one skipped"
+    fi
+    rm -rf "$fdp"
+  fi
+
+  sec "jq discovery after a winget install"
+  local wj wgot wdir
+  wj=$(mktemp -d 2>/dev/null) || wj=""
+  if [ -z "$wj" ]; then
+    warn "failed to create a temporary directory" "jq discovery fixture skipped"
+  else
+    wdir="$wj/Microsoft/WinGet/Packages/jqlang.jq_fixture"
+    mkdir -p "$wdir" && : > "$wdir/jq.exe"
+    wgot=$(bash -c 'source "$1" >/dev/null 2>&1; orangekit_winget_jq_dir "$2"' _ "$ROOT/scripts/lib/common.sh" "$wj" 2>/dev/null || true)
+    [ "$wgot" = "$wdir" ] && ok "a jq installed by winget is found without a shell restart" \
+      || bad "winget jq not found (got '${wgot}')" "hooks stay degraded until Claude Code restarts"
+    rm -f "$wdir/jq.exe"
+    wgot=$(bash -c 'source "$1" >/dev/null 2>&1; orangekit_winget_jq_dir "$2"' _ "$ROOT/scripts/lib/common.sh" "$wj" 2>/dev/null || true)
+    [ -z "$wgot" ] && ok "  …and nothing is reported when winget has no jq" \
+      || bad "a jq directory was reported where none exists: $wgot"
+    rm -rf "$wj"
+  fi
+
   # Root resolution check
+  sec "worktree snapshot shape (GNU · BSD stat)"
+  # One line per changed file: path<TAB>mtime<TAB>size. GNU stat once read `stat -f` as file-system status and the
+  # snapshot filled with free-block counts that change by the second (Linux · Git Bash) — the Stop gate's baseline
+  local ws wsout wsbad
+  ws=$(mktemp -d 2>/dev/null) || ws=""
+  if [ -n "$ws" ]; then
+    ( cd "$ws" && git init -q && printf 'a\n' > a.ts && printf 'b\n' > b.ts && git add -A \
+      && git -c user.email=t@t -c user.name=t commit -qm x && printf 'a2\n' > a.ts && printf 'b2\n' > b.ts ) >/dev/null 2>&1
+    wsout=$(cd "$ws" && bash -c 'source "$1" >/dev/null 2>&1; orangekit_worktree_snapshot' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+    wsbad=$(printf '%s\n' "$wsout" | awk -F'\t' 'NF != 3 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/' | head -1)
+    if [ "$(printf '%s\n' "$wsout" | grep -c .)" = 2 ] && [ -z "$wsbad" ]; then
+      ok "2 changed files → 2 lines of path·mtime·size"
+    else
+      bad "worktree snapshot malformed" "expected 2 lines path<TAB>mtime<TAB>size — first bad line: ${wsbad:-(line count $(printf '%s\n' "$wsout" | grep -c .))}"
+    fi
+    rm -rf "$ws"
+  fi
+
+  sec "Windows: Python and jq resolution (simulated Git Bash)"
+  # OSTYPE=msys + a python3 that behaves like the Microsoft Store alias (exit 9009) + a python and a jq that end lines with
+  # CRLF, as native Windows builds do. The resolver must pick the working python and strip the \r from both
+  local wb wpy wjq realpy
+  realpy=$(command -v python3 2>/dev/null || true)
+  wb=$(mktemp -d 2>/dev/null) || wb=""
+  if [ -z "$wb" ] || [ -z "$realpy" ] || ! command -v jq >/dev/null 2>&1; then
+    warn "Windows resolution simulation skipped" "needs python3, jq and a temp directory on this host"
+  else
+    printf '#!/bin/bash\nexit 9009\n' > "$wb/python3"
+    printf '#!/bin/bash\n"%s" "$@" | sed "s/$/\\r/"\n' "$realpy" > "$wb/python"
+    printf '#!/bin/bash\n"%s" "$@" | sed "s/$/\\r/"\n' "$(command -v jq)" > "$wb/jq"
+    chmod +x "$wb/python3" "$wb/python" "$wb/jq"
+    wpy=$(OSTYPE=msys PATH="$wb:$PATH" bash -c 'source "$1" >/dev/null 2>&1; python3 -c "print(6*7)"' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+    [ "$wpy" = 42 ] && ok "Store-alias python3 skipped → python used, CRLF stripped" \
+      || bad "Windows python resolution failed (got '$(printf '%s' "$wpy" | od -c | head -1)')" "init, update and the session brief would run no Python or read values ending in \\r"
+    wjq=$(OSTYPE=msys PATH="$wb:$PATH" bash -c 'source "$1" >/dev/null 2>&1; printf "{\"a\":\"x\"}" | jq -r .a' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+    [ "$wjq" = x ] && ok "  …native jq.exe CRLF stripped" || bad "jq CRLF not stripped on a Windows shell (got '$(printf '%s' "$wjq" | od -c | head -1)')"
+    wpy=$(OSTYPE=darwin PATH="$wb:$PATH" bash -c 'source "$1" >/dev/null 2>&1; type -t python3' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+    [ "$wpy" = file ] && ok "  …and outside a Windows shell nothing is wrapped" || bad "the Windows resolver ran on a non-Windows shell (python3 is a $wpy)"
+    rm -rf "$wb"
+  fi
+
+  sec "Windows paths (Git Bash)"
+  # Claude Code on Windows hands hooks C:\… paths; every comparison in the hooks splits on "/" (orangekit_slashes)
+  local wp
+  wp=$(bash -c 'source "$1" >/dev/null 2>&1; orangekit_slashes "$2"' _ "$ROOT/scripts/lib/common.sh" 'C:\Users\me\proj\src\a.ts' 2>/dev/null || true)
+  [ "$wp" = 'C:/Users/me/proj/src/a.ts' ] && ok "a Windows path from Claude Code becomes C:/… (prefix strips and paths: globs meet)" \
+    || bad "Windows path not normalized (got '${wp}')" "the knowledge gate and the API-route checks never match on Windows"
+  wp=$(OSTYPE=darwin bash -c 'source "$1" >/dev/null 2>&1; orangekit_slashes "$2"' _ "$ROOT/scripts/lib/common.sh" '/tmp/a\b' 2>/dev/null || true)
+  [ "$wp" = '/tmp/a\b' ] && ok "  …a backslash in a macOS/Linux file name is left alone" \
+    || bad "a POSIX file name with a backslash was rewritten (got '${wp}')"
+  wp=$(OSTYPE=msys bash -c 'source "$1" >/dev/null 2>&1; orangekit_slashes "$2"' _ "$ROOT/scripts/lib/common.sh" 'src\a.ts' 2>/dev/null || true)
+  [ "$wp" = 'src/a.ts' ] && ok "  …and a relative path on a Windows shell is normalized too" \
+    || bad "relative Windows path not normalized (got '${wp}')"
+
   sec "root resolution"
   local resolved
   resolved=$(cd "$(dirname scripts/doctor.sh)/.." 2>/dev/null && pwd)
@@ -3045,8 +3206,10 @@ run_consumer() {
     local bk="AKI""A""IOSFODNN7""EXAMPLE" bfill berr
     bfill=$(yes '// filler' 2>/dev/null | head -30000)
     code=0
-    berr=$(jq -nc --arg c "export const id = '$bk';
-$bfill" --arg p "$up/src/cfg.ts" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:$c}}' \
+    # The content goes to jq on stdin, not as --arg: Linux caps one argument at 128 KB (MAX_ARG_STRLEN), so a 300 KB
+    # --arg made jq itself fail with exit 126 there and this case reported a hook defect that did not exist (macOS has no such cap)
+    berr=$({ printf "export const id = '%s';\n" "$bk"; printf '%s\n' "$bfill"; } \
+      | jq -Rsc --arg p "$up/src/cfg.ts" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:.}}' \
       | CLAUDE_PLUGIN_ROOT="$cache" CLAUDE_PROJECT_DIR="$up" bash "$cache/scripts/security-check.sh" 2>&1 >/dev/null) || code=$?
     if [ "$code" = 2 ] && printf '%s' "$berr" | grep -q 'AWS'; then
       ok "security-check: secret on the first line of a 300KB Write → blocked (AWS reason)"

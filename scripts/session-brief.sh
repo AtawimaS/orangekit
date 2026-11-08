@@ -192,7 +192,7 @@ if [ -f "$HOOKS_JSON" ] && command -v jq >/dev/null 2>&1; then
   # session-brief's own record count** (this session's is already in there).
   SEEN=$(orangekit_num "$(awk -F'|' '{print $1}' "$HB" 2>/dev/null | sort -u | wc -l)")
   SESSIONS=$(orangekit_num "$(awk -F'|' '$1=="session-brief"' "$HB" 2>/dev/null | wc -l)")
-  FAILED=$(awk -F'|' '$4!="0" {print $1}' "$HB" 2>/dev/null | sort -u | tr '\n' ' ')
+  FAILED=$(orangekit_recent_failures "$HB" | tail -5)
 
   # Unconditional hooks missing from the log
   UMISS=""
@@ -214,7 +214,27 @@ if [ -f "$HOOKS_JSON" ] && command -v jq >/dev/null 2>&1; then
   else
     printf -- '- hooks %s/%s OK\n' "$SEEN" "$EXPECTED"
   fi
-  [ -n "$FAILED" ] && printf -- '- ⚠️ hooks that exited abnormally: %s\n' "$FAILED"
+  if [ -n "$FAILED" ]; then
+    printf -- '- ⚠️ orangekit hook errors since the last session (most recent %s):\n' "$(printf '%s\n' "$FAILED" | grep -c .)"
+    printf '%s\n' "$FAILED" | sed 's/^/    - /'
+    # Draft the report now, the way Claude Code drafts its own; it is reviewed and sent only on the user's word.
+    # One draft per distinct error — one already drafted, sent or dismissed is not drafted again
+    FD="$(orangekit_state_dir)/feedback-drafts"; FIRST=""
+    mkdir -p "$FD" 2>/dev/null || true
+    while IFS= read -r e; do
+      [ -n "$e" ] || continue
+      sig=$(printf '%s' "$e" | cksum | cut -d' ' -f1)
+      { [ -e "$FD/$sig.md" ] || [ -e "$FD/sent/$sig.md" ] || [ -e "$FD/dismissed/$sig.md" ]; } && continue
+      printf '# orangekit hook error: %s\n\n**Kind:** bug (hook error, drafted at session start)\n\n### What happened\n%s\n\n### Expected\nThe hook exits 0.\n' \
+        "$(printf '%s' "$e" | cut -c1-72)" "$e" > "$FD/$sig.md" 2>/dev/null && [ -z "$FIRST" ] && FIRST="$e"
+    done <<< "$FAILED"
+    ND=$(orangekit_num "$({ ls "$FD"/*.md 2>/dev/null || true; } | wc -l)")
+    if [ "$ND" -gt 0 ]; then
+      printf -- '- ✱ Bug report drafted: %s\n' "${FIRST:-$(sed -n '1s/^# //p' "$({ ls -t "$FD"/*.md 2>/dev/null || true; } | sed -n 1p)" 2>/dev/null)}"
+      printf -- '    %s to review in .claude/.orangekit/feedback-drafts/ — offer it ONCE with AskUserQuestion ("Review & send" / "Not now"), never as a question at the end of a message. "Review & send" runs /orangekit-feedback: duplicate search, the full body, then File it / Edit / Dismiss\n' "$ND"
+      orangekit_edge "session-start" "orangekit-feedback"
+    fi
+  fi
 fi
 
 # jq absent — functionality quietly degrades. The build gate falls to undecidable (does not block) and
@@ -291,8 +311,8 @@ if [ -n "${PLUG_VER:-}" ]; then
     done
     FIXES=""
   fi
-  [ -n "$FIXES" ] && printf -- '- There are guide fixes under the same stack premise (plugin v%s ↔ installed%s) — `bash "%s/scripts/install-guide.sh" --frontend <pack> --backend <pack> [--app <app>] --notes .orangekit/preset-notes.json`\n' \
-    "$PLUG_VER" "$FIXES" "$PLUGIN_ROOT"
+  [ -n "$FIXES" ] && printf -- '- There are guide fixes under the same stack premise (plugin v%s ↔ installed%s) — run `/orangekit-update`\n' \
+    "$PLUG_VER" "$FIXES"
   [ -n "$PINNED" ] && printf -- '- %s: the plugin pack has moved to a different stack major — **not updating**. Move it across with `/stack-guide-generator` when you raise the dependency\n' \
     "$(printf '%s' "$PINNED" | sed 's/^ //')"
   [ -n "$CPIN" ] && printf -- '- %s: the plugin pack moved to the standard wire contract and diverges from the installed seam — **not updating**. For a prebuilt seam, add `--seam <combination>` to the update command; for a generated seam, move it across when you regenerate it with `/stack-guide-generator`\n' \
@@ -378,11 +398,11 @@ PYDEP
       TV=$({ grep -m1 -oE 'orangekit-rule-version: [0-9.]+' "$RC"  2>/dev/null || true; } | awk '{print $2}')
       [ -n "${SV:-}" ] && [ -n "${TV:-}" ] && [ "$SV" != "$TV" ] && RDRIFT=$((RDRIFT+1))
     done
-    [ "$RDRIFT" -gt 0 ] && printf -- '- %s T1 rule cards are on an old version — re-run `bash "%s/scripts/install-rules.sh"`\n' "$RDRIFT" "$PLUGIN_ROOT"
+    [ "$RDRIFT" -gt 0 ] && printf -- '- %s T1 rule cards are on an old version — `/orangekit-update` brings every plugin-installed file along (cards · references · stack cards · guides)\n' "$RDRIFT"
     # A new card appeared in the plugin but is absent from the project (the drift loop cannot catch this).
     # The config gate is mandatory — without it a repo that does not use orangekit gets a "0/8 cards" warning.
     [ "$RCOUNT" -lt "$PCOUNT" ] && [ -f "$ORANGEKIT_ROOT/orangekit.config.json" ] \
-      && printf -- '- only %s/%s T1 rule cards installed — re-run `bash "%s/scripts/install-rules.sh"`\n' "$RCOUNT" "$PCOUNT" "$PLUGIN_ROOT"
+      && printf -- '- only %s/%s T1 rule cards installed — run `/orangekit-update`\n' "$RCOUNT" "$PCOUNT"
   fi
 fi
 
@@ -450,7 +470,7 @@ fi
 # and the mtime of the newest report is the last check time.
 LATEST_HE=$({ ls -t "$ORANGEKIT_ROOT"/dev/docs/harness-evaluation/*.md 2>/dev/null || true; } | head -1)
 if [ -n "$LATEST_HE" ]; then
-  HE_MTIME=$(orangekit_num "$(stat -f %m "$LATEST_HE" 2>/dev/null || stat -c %Y "$LATEST_HE" 2>/dev/null || true)")
+  HE_MTIME=$(orangekit_num "$(stat -c %Y "$LATEST_HE" 2>/dev/null || stat -f %m "$LATEST_HE" 2>/dev/null || true)")   # GNU first (see orangekit_worktree_snapshot)
   NOW_TS=$(orangekit_num "$(date +%s)")
   if [ "$HE_MTIME" -gt 0 ] && [ "$NOW_TS" -gt "$HE_MTIME" ]; then
     HE_AGE=$(( (NOW_TS - HE_MTIME) / 86400 ))

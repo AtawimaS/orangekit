@@ -23,7 +23,7 @@ ORANGEKIT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/nul
 [ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ] && orangekit_heartbeat 0
 
 TOOL_NAME=$(orangekit_field "$INPUT" '.tool_name')
-FILE_PATH=$(orangekit_field "$INPUT" '.tool_input.file_path')
+FILE_PATH=$(orangekit_slashes "$(orangekit_field "$INPUT" '.tool_input.file_path')")   # C:\…\a.ts → C:/…/a.ts (Windows)
 CONTENT=$(orangekit_field "$INPUT" '.tool_input.content')
 NEW_STRING=$(orangekit_field "$INPUT" '.tool_input.new_string')
 
@@ -107,7 +107,7 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
 }
 _gate_rel() {   # $1 path (absolute or relative) $2 base directory → the project-relative path, or an empty string if outside
   local p="$1"
-  case "$p" in /*) ;; *) p="${2:-$ORANGEKIT_ROOT}/${p#./}" ;; esac
+  case "$p" in /*|[A-Za-z]:/*) ;; *) p="${2:-$ORANGEKIT_ROOT}/${p#./}" ;; esac   # C:/… is absolute too (Windows)
   case "$p" in "$ORANGEKIT_ROOT"/*) printf '%s' "${p#"$ORANGEKIT_ROOT"/}" ;; esac
 }
 _owners_of() {   # $1 project-relative path  $2 1=new file 0=existing → lines of "card<TAB>name<TAB>ERE" · "skill<TAB>name<TAB>"
@@ -164,6 +164,7 @@ $list"
         [ "$_k" = S ] && { [ "$_v" = "$n" ] || [[ "$_v" == *:"$n" ]]; } && { seen=1; break; }
         continue
       fi
+      case "$_v" in [A-Za-z]:\\*) _v=${_v//\\//} ;; esac   # a Windows Read path, same form as ORANGEKIT_ROOT
       case "$_k" in
         R) if [[ "$_v" == */.claude/rules/"$n" ]]; then
              if [ -z "$_l" ] || [ "$(orangekit_num "$_l")" -ge "$(orangekit_count_lines "$_v")" ]; then seen=1; break; fi
@@ -1115,7 +1116,9 @@ $(_db_creates_via_fns "$seg")
   # (target branch · pass when undecidable) stay as they are and **only the entrance** is widened.
   local pushseg="" pmode=""
   if dhas 'git[[:space:]]+push'; then
-    pushseg=$(printf '%s' "$DCMD" | tr ';|&' '\n' | grep -E 'git[[:space:]]+push' | head -1)
+    # -i like dhas above: on a case-insensitive filesystem (macOS APFS · Windows NTFS) `GIT push` runs git. A case-sensitive
+    # grep here found no segment, the pipeline failed under pipefail and the hook exited 1 — a hook error, not a block
+    pushseg=$(printf '%s' "$DCMD" | tr ';|&' '\n' | grep -Ei 'git[[:space:]]+push' | sed -n 1p)
     if grep <<<"$pushseg" -Eq -- '(--force([^-]|$)|[[:space:]]-f([[:space:]]|$))' \
        && ! grep <<<"$pushseg" -q -- '--force-with-lease'; then
       pmode="force"
