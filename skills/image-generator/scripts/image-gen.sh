@@ -39,20 +39,8 @@
 #            failure makes a false positive, and false positives make the user turn the guard off.
 set -uo pipefail   # no -e: run the checks to the end and emit the whole report
 
-# ── Windows (Git Bash · MSYS · Cygwin): resolve Python, strip CRLF — identical in common.sh · install-guide.sh · image-gen.sh
-# `python3` is often the Microsoft Store alias — on PATH, but it opens the Store (exit 9009) instead of running — while a
-# python.org install answers to `python` or `py -3`. Native jq.exe and python.exe also end every line with CRLF, and the
-# trailing \r broke comparisons silently. Only on a Windows shell; macOS and Linux are untouched.
-case "${OSTYPE:-}" in
-  msys*|cygwin*|win*)
-    _ok_py=""
-    for _ok_c in python3 python "py -3"; do
-      $_ok_c -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 && { _ok_py=$_ok_c; break; }
-    done
-    [ -n "$_ok_py" ] && eval "python3() { command $_ok_py \"\$@\" | tr -d '\\r'; return \"\${PIPESTATUS[0]}\"; }"
-    command -v jq >/dev/null 2>&1 && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
-    unset _ok_py _ok_c ;;
-esac
+# Windows shims (Python resolution, CRLF stripping) — canonical in <plugin>/scripts/lib/win-compat.sh
+_okc="$(cd "$(dirname "$0")/../../.." 2>/dev/null && pwd)/scripts/lib/win-compat.sh"; [ -f "$_okc" ] && . "$_okc"; unset _okc
 
 FAIL=0; WARN=0; PASS=0
 C_R=$'\033[31m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_D=$'\033[2m'; C_0=$'\033[0m'

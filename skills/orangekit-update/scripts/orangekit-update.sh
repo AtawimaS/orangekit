@@ -25,6 +25,9 @@
 
 set -uo pipefail   # no -e: every step runs to the end so the full report is produced
 
+# Windows shims (Python resolution, CRLF stripping) — canonical in <plugin>/scripts/lib/win-compat.sh
+_okc="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd)/scripts/lib/win-compat.sh"; [ -f "$_okc" ] && . "$_okc"; unset _okc
+
 FAIL=0; WARN=0; PASS=0
 C_R=$'\033[31m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_D=$'\033[2m'; C_0=$'\033[0m'
 [ -t 1 ] || { C_R=""; C_G=""; C_Y=""; C_D=""; C_0=""; }
@@ -69,6 +72,15 @@ _count_changes() {  # stdin: installer output → number of files it would write
 
 # The per-file lines of an installer (+ new · ↑ updated), indented under this report
 _show_changes() { grep -E '^[[:space:]]+(\+|↑) ' | sed 's/^[[:space:]]*/      /' || true; }
+
+# Copies newer than the plugin's own are kept by the installers (no downgrade) — said out loud, never counted as pending
+_report_kept() {  # $1 installer output
+  local k; k=$(num "$(printf '%s\n' "$1" | grep -c 'newer than the plugin' || true)")
+  [ "$k" -eq 0 ] && return 0
+  warn "$k file(s) are newer than this plugin — kept, not downgraded" \
+       "a newer or forked plugin set them up; update the plugin to match, or reinstall with --force to take this plugin's copy"
+  printf '%s\n' "$1" | grep 'newer than the plugin' | sed 's/^[[:space:]]*/      /'
+}
 
 step_v2() {
   sec "v2 harness"
@@ -132,6 +144,7 @@ step_rules() {  # $1 = check|apply
   local out n
   out=$(CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$PROJECT" bash "$PLUGIN_ROOT/scripts/install-rules.sh" --dry-run 2>&1)
   n=$(num "$(printf '%s\n' "$out" | _count_changes)")
+  [ "$1" = check ] && _report_kept "$out"
   if [ "$n" -eq 0 ]; then ok "every T1 card and reference is current"; return 0; fi
   if [ "$1" = check ]; then
     PENDING=$((PENDING+n)); warn "$n card/reference files behind"; printf '%s\n' "$out" | _show_changes; return 0
@@ -157,6 +170,7 @@ step_guides() {  # $1 = check|apply
   pinned=$(printf '%s\n' "$out" | grep -E '^[[:space:]]*state:' | grep -oE '[a-z]+=pinned' | cut -d= -f1 | tr '\n' ' ')
   [ -n "$pinned" ] && human "guide premise moved for: ${pinned}— not updated" "move it across with /stack-guide-generator when the project raises that dependency"
   n=$(num "$(printf '%s\n' "$out" | _count_changes)")
+  [ "$1" = check ] && _report_kept "$out"
   if [ "$n" -eq 0 ]; then ok "$mode current"; return 0; fi
   if [ "$1" = check ]; then
     PENDING=$((PENDING+n)); warn "$n $mode files behind"; printf '%s\n' "$out" | _show_changes; return 0
@@ -287,6 +301,22 @@ self_test() {
     && ok "retired card moved to a dated shadow" || bad "retired card not shadowed"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" 2>&1); rc=$?
   [ "$rc" -eq 0 ] && ok "check afterwards → exit 0 (up to date)" || bad "check afterwards → exit $rc" "$(printf '%s' "$out" | tail -4 | tr '\n' ' ')"
+
+  sec "no downgrade (a newer or forked plugin set the project up)"
+  local N="$T/newer"; mkdir -p "$N"
+  printf '{"techStack":{"presets":{"frontend":"nextjs","backend":"none","app":"none"}}}\n' > "$N/orangekit.config.json"
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$N" bash "$PLUGIN_ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$N" bash "$PLUGIN_ROOT/scripts/install-guide.sh" --frontend nextjs --backend none --rules-only --no-freshness >/dev/null 2>&1
+  sed 's/orangekit-rule-version: [0-9.]*/orangekit-rule-version: 99.0.0/' "$N/.claude/rules/security.md" > "$T/x" && mv "$T/x" "$N/.claude/rules/security.md"
+  sed 's#\(orangekit-pack: frontend/nextjs\) v[0-9.]*#\1 v99.0.0#' "$N/.claude/rules/stack-frontend-nextjs.md" > "$T/x" && mv "$T/x" "$N/.claude/rules/stack-frontend-nextjs.md"
+  out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$N" 2>&1); rc=$?
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'newer than this plugin' && printf '%s' "$out" | grep -q 'security.md' \
+    && printf '%s' "$out" | grep -q 'stack-frontend-nextjs.md' \
+    && ok "a newer card and a newer stack card → reported as kept, nothing pending (exit 0)" \
+    || bad "newer copies not reported as kept (exit $rc)" "$(printf '%s' "$out" | tail -4 | tr '\n' ' ')"
+  bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$N" --apply >/dev/null 2>&1
+  grep -q 'orangekit-rule-version: 99.0.0' "$N/.claude/rules/security.md" && grep -q 'frontend/nextjs v99.0.0' "$N/.claude/rules/stack-frontend-nextjs.md" \
+    && ok "apply does not downgrade them" || bad "apply downgraded a newer copy"
 
   sec "what it refuses to guess"
   mkdir -p "$T/v2/.claude/hooks"; : > "$T/v2/.claude/hooks/stop-guard.sh"; printf '{}\n' > "$T/v2/orangekit.config.json"

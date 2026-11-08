@@ -20,6 +20,9 @@
 
 set -uo pipefail   # no -e: run every check to the end so the report is complete
 
+# Windows shims (Python resolution, CRLF stripping) — canonical in scripts/lib/win-compat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/win-compat.sh" 2>/dev/null || true
+
 # There are two roots — merging them breaks the plugin structure checks inside a consumer project:
 #   PLUGIN_ROOT: plugin asset checks (fast/graph/self-test) — the script's own location is the truth
 #   PROJ:        project state checks (usage/lessons) — hook logs and lessons live on the consumer side
@@ -318,16 +321,30 @@ run_fast() {
     ok "every variable expansion ends on ASCII (bash 3.2 safe)"
   fi
 
-  # The Windows resolver block is copied, not sourced (installers and checkers do not source common.sh) — a copy is a drift
-  # source, so the three copies are compared here
-  local wr wr0="" wrf=""
-  for f in scripts/lib/common.sh scripts/install-guide.sh skills/image-generator/scripts/image-gen.sh; do
-    wr=$(awk '/resolve Python, strip CRLF/{f=1} f{print} f&&/^esac$/{exit}' "$f" 2>/dev/null)
-    [ -z "$wr" ] && { wrf="$wrf $f(missing)"; continue; }
-    if [ -z "$wr0" ]; then wr0=$wr; elif [ "$wr" != "$wr0" ]; then wrf="$wrf $f"; fi
-  done
-  [ -z "$wrf" ] && ok "Windows Python/jq resolver is identical in its 3 copies" \
-    || bad "Windows resolver copies drifted:$wrf" "keep scripts/lib/common.sh · install-guide.sh · image-gen.sh identical"
+  # Windows shims live in scripts/lib/win-compat.sh. Every shipped script that calls jq or python3 must load it — directly,
+  # or through common.sh — or on Windows its values carry a \r (measured on windows-latest: doctor read every graph path
+  # as "missing"). The orangekit-harness plugin ships without scripts/, so its copies must equal the canonical block
+  local wr0 wr wrf="" wmiss="" f
+  wr0=$(awk '/resolve Python, strip CRLF/{f=1} f{print} f&&/^esac$/{exit}' scripts/lib/win-compat.sh 2>/dev/null)
+  while IFS= read -r f; do
+    # the canonical file, this checker, and profiles (sourced by pack-smoke, which loads the shims) are not callers
+    case "$f" in scripts/lib/win-compat.sh|scripts/doctor.sh|*/scripts/profiles/*) continue ;; esac
+    grep -qE '(^|[^a-z_-])(jq|python3)( |$)' "$f" 2>/dev/null || continue
+    if grep -qE 'win-compat\.sh|lib/common\.sh' "$f" 2>/dev/null; then
+      if grep -q 'a COPY of orangekit-product' "$f" 2>/dev/null; then
+        wr=$(awk '/resolve Python, strip CRLF/{f=1} f{print} f&&/^esac$/{exit}' "$f" 2>/dev/null)
+        [ "$wr" = "$wr0" ] || wrf="$wrf $f"
+      fi
+    else
+      wmiss="$wmiss $f"
+    fi
+  done < <({ git ls-files '*.sh' 2>/dev/null || find scripts skills harness marketing -name '*.sh' -type f 2>/dev/null; } | grep -v '/fixtures/')
+  [ -n "$wr0" ] || wrf=" scripts/lib/win-compat.sh(no block)"
+  if [ -z "$wrf$wmiss" ]; then ok "every jq/python3 script loads the Windows shims; harness copies match the canonical block"
+  else
+    [ -n "$wmiss" ] && bad "jq/python3 without the Windows shims:$wmiss" "source scripts/lib/win-compat.sh (or lib/common.sh) — on Windows every value ends in \\r"
+    [ -n "$wrf" ] && bad "Windows shim copies drifted:$wrf" "keep harness copies identical to scripts/lib/win-compat.sh"
+  fi
 
   # CRLF line endings in a shipped text file — Git for Windows defaults to core.autocrlf=true, and a checkout made that
   # way turns `fi` into `fi\r`: every hook dies with "command not found" and an agent's frontmatter stops parsing.

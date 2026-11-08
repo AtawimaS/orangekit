@@ -32,20 +32,9 @@ if ! command -v jq >/dev/null 2>&1; then
   [ -z "$_okjq" ] || PATH="$_okjq:$PATH"
   unset _okjq
 fi
-# ── Windows (Git Bash · MSYS · Cygwin): resolve Python, strip CRLF — identical in common.sh · install-guide.sh · image-gen.sh
-# `python3` is often the Microsoft Store alias — on PATH, but it opens the Store (exit 9009) instead of running — while a
-# python.org install answers to `python` or `py -3`. Native jq.exe and python.exe also end every line with CRLF, and the
-# trailing \r broke comparisons silently. Only on a Windows shell; macOS and Linux are untouched.
-case "${OSTYPE:-}" in
-  msys*|cygwin*|win*)
-    _ok_py=""
-    for _ok_c in python3 python "py -3"; do
-      $_ok_c -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 && { _ok_py=$_ok_c; break; }
-    done
-    [ -n "$_ok_py" ] && eval "python3() { command $_ok_py \"\$@\" | tr -d '\\r'; return \"\${PIPESTATUS[0]}\"; }"
-    command -v jq >/dev/null 2>&1 && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
-    unset _ok_py _ok_c ;;
-esac
+# Windows shims (Python resolution, CRLF stripping) — one canonical file, see its header
+# shellcheck source=win-compat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/win-compat.sh"
 
 # ── ERR trap: a failure is not passed over quietly ────────────────────
 # Emits to stderr, but the exit code follows each hook's own policy.
