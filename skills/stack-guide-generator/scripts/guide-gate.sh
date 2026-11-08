@@ -597,7 +597,12 @@ check_pack_iface() {
   if [ "$n" -eq 0 ]; then
     # A pack can declare 0 requires on purpose (the fastify pack since 3.35.0: the wire contract and auth variants own the HTTP layer).
     # An empty table under its header, or an explicit "None." / "Empty" / "there are 0", is an answer, not a parse failure
-    if awk '/^## requires/{f=1;next} /^## /{f=0} f' "$led" | grep -qiE '^\|[[:space:]]*symbol[[:space:]]*\||^none\b|^\*\*empty|there are 0'; then
+    # Only an explicit answer counts: "None." / "Empty" / "there are 0", or a table header whose body has NO data rows.
+    # A header followed by rows this parser could not read is a format error and must still warn (it used to read as 0)
+    if awk '/^## requires/{f=1;next} /^## /{f=0} f' "$led" \
+       | awk 'BEGIN{IGNORECASE=1} tolower($0) ~ /^none([^a-z]|$)|^\*\*empty|there are 0/ {say=1}
+              /^\|/ { if (tolower($0) ~ /^\|[[:space:]]*symbol[[:space:]]*\|/) hdr=1; else if ($0 !~ /^\|[[:space:]:|-]+$/) rows=1 }
+              END { exit !(say || (hdr && !rows)) }'; then
       ok "the pack declares 0 requires — nothing for the combination to satisfy"
     else
       warn "could not read requires entries from the pack ledger" "format: | \`symbol\` | kind | shape | reason |"
@@ -743,7 +748,7 @@ _policy_fence_filter() { # stdin=codelines rows · $1=exemption column
     BEGIN { n = split(pats, P, ",") }
     function glob2re(g,   r) { r = g; gsub(/[.+^$(){}|\[\]\\]/, "\\\\&", r); gsub(/\*/, "[^/]*", r); gsub(/\?/, ".", r); return r }
     {
-      d = $5; skip = 0
+      d = $NF; skip = 0   # last column, not $5: a tab inside a code line shifts the middle columns
       if (d != "") for (i = 1; i <= n; i++) { re = glob2re(P[i]); if (d ~ ("^" re "$") || d ~ ("/" re "$")) { skip = 1; break } }
       if (!skip) print
     }'
@@ -2167,6 +2172,9 @@ run_self_test() {
   _o=$(bash "$0" --guide "$fx/clean/sample-backend-guide" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-empty.md 2>&1)
   if printf '%s' "$_o" | grep -q 'declares 0 requires' && ! printf '%s' "$_o" | grep -q 'could not read requires'; then ok "a pack that declares 0 requires is not reported as unreadable"
   else bad "a pack that declares 0 requires is reported as unreadable" "the gate warned 'could not read requires entries' for an empty requires section"; fi
+  _o=$(bash "$0" --guide "$fx/clean/sample-backend-guide" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-badrows.md 2>&1)
+  if printf '%s' "$_o" | grep -q 'could not read requires' && ! printf '%s' "$_o" | grep -q 'declares 0 requires'; then ok "a requires table with unreadable rows still warns (not read as 0 requires)"
+  else bad "unreadable requires rows were read as 'declares 0 requires'" "a format error would hide every requires check"; fi
   _o=$(bash "$0" --guide "$fx/clean/sample-backend-guide" --generated --assembly "$A" --plugin-guides "$PG" --pack-ledger-name ledger-noreq.md 2>&1)
   if printf '%s' "$_o" | grep -q 'could not read requires'; then ok "a ledger with no requires section still warns (not silenced)"
   else bad "a ledger with no requires section no longer warns" "the empty-requires allowance swallowed a missing section"; fi
@@ -3280,6 +3288,7 @@ FXL3
   cp -R "$fx/clean/sample-backend-guide" "$fx/envok/" && cp -R "$fx/clean/sample-backend-guide" "$fx/envbad/"
   printf '\n```ts\n// src/test/env.ts — injects the isolated DB before the app loads\nprocess.env.DATABASE_URL = TEST_URL\n```\n' >> "$fx/envok/sample-backend-guide/resources/b.md"
   printf '\n<!-- file: src/test/global-setup.ts -->\n```ts\nconst url = process.env.TEST_DATABASE_URL\n```\n' >> "$fx/envok/sample-backend-guide/resources/c.md"
+  printf '\n```ts\n// src/test/tabbed.ts\nprocess.env.TABBED = 1\t// a tab on the matching line shifts the columns\n```\n' >> "$fx/envok/sample-backend-guide/resources/c.md"
   printf '\n```ts\n// src/test/env.ts\nprocess.env.DATABASE_URL = TEST_URL\n```\n\n```ts\nconst url = process.env.DATABASE_URL\n```\n' >> "$fx/envbad/sample-backend-guide/resources/b.md"
 
   # ── pack/seam fixtures (the new surface that appeared in v3.12.0) ──
@@ -3312,6 +3321,12 @@ FXLEDOK
 ## requires — the seam must supply them
 None. The pack owns the whole layer.
 FXLEDE
+  cat > "$pk/ledger-badrows.md" <<'FXLEDB'
+## requires — the seam must supply them
+| symbol | kind | shape | reason |
+| --- | --- | --- | --- |
+| connect without backticks | project | fn | seam |
+FXLEDB
   cat > "$pk/ledger-noreq.md" <<'FXLEDN'
 ## provides
 | symbol | kind |

@@ -19,7 +19,9 @@ source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/
 
 # A failed root resolution must not stop the security check — only the heartbeat is best-effort
 ORANGEKIT_HOOK_NAME="security-check"
-ORANGEKIT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || printf '')}"
+# Through orangekit_slashes like every path from Claude Code — on Windows CLAUDE_PROJECT_DIR is C:\…, and a root left in that
+# form never prefixes a normalized C:/… file path (the knowledge gate then found no owner: fail-open)
+ORANGEKIT_ROOT=$(orangekit_slashes "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || printf '')}")
 [ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ] && orangekit_heartbeat 0
 
 TOOL_NAME=$(orangekit_field "$INPUT" '.tool_name')

@@ -262,8 +262,9 @@ codex_generate() {   # $1 prompt · $2 out · $3 timeout
     "" "Brief:" "$prompt" > "$w/prompt.txt"
   printf '  generating through the Codex CLI (counts toward your ChatGPT plan usage; up to %ss)…\n' "$timeout"
 
-  # A watchdog instead of timeout(1), which macOS does not ship
-  ( cd "$w" && "$CODEX_BIN" exec --skip-git-repo-check --sandbox read-only --ephemeral -C "$w" \
+  # A watchdog instead of timeout(1), which macOS does not ship. `exec` makes the background pid Codex itself — without it
+  # the kill hit only the subshell and Codex kept running, landing a late image in generated_images after we gave up
+  ( cd "$w" && exec "$CODEX_BIN" exec --skip-git-repo-check --sandbox read-only --ephemeral -C "$w" \
       -o "$w/last.txt" - < "$w/prompt.txt" > "$w/log.txt" 2>&1 ) &
   local pid=$! waited=0
   while kill -0 "$pid" 2>/dev/null; do
@@ -272,15 +273,17 @@ codex_generate() {   # $1 prompt · $2 out · $3 timeout
   done
   wait "$pid"; local rc=$?
 
-  if grep -q 'IMAGEGEN_UNAVAILABLE' "$w/last.txt" "$w/log.txt" 2>/dev/null; then
-    bad "this Codex CLI has no built-in image_gen in non-interactive mode — undecidable" \
-        "Proceed in handoff mode (paste the prompt into ChatGPT or the Codex desktop app)."
-    rm -rf "$w"; return 2
-  fi
   local src
   src=$(find "$CODEX_HOME_DIR/generated_images" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' \) \
           -newer "$w/.start" 2>/dev/null | while IFS= read -r f; do printf '%s\t%s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"; done \
           | sort -t "$(printf '\t')" -k1,1n | tail -1 | cut -f2)
+  # The image decides first. "Unavailable" is read only from Codex's final message as an exact line — the prompt itself says
+  # IMAGEGEN_UNAVAILABLE, and codex exec echoes the prompt into its log, so searching the log read every run as unavailable
+  if [ -z "$src" ] && tr -d '\r' < "$w/last.txt" 2>/dev/null | grep -qx '[[:space:]]*IMAGEGEN_UNAVAILABLE[[:space:]]*'; then
+    bad "this Codex CLI has no built-in image_gen in non-interactive mode — undecidable" \
+        "Proceed in handoff mode (paste the prompt into ChatGPT or the Codex desktop app)."
+    rm -rf "$w"; return 2
+  fi
   if [ -z "$src" ]; then
     bad "Codex produced no image in $CODEX_HOME_DIR/generated_images (codex exit $rc)" "$(tail -3 "$w/log.txt" 2>/dev/null | tr '\n' ' ')"
     rm -rf "$w"; return 1
@@ -295,7 +298,20 @@ codex_generate() {   # $1 prompt · $2 out · $3 timeout
     *.png:89504e47*|*.jpg:ffd8ff*|*.jpeg:ffd8ff*|*.webp:52494646*) ;;
     *) warn "the file Codex returned is a different format than the --out extension" "keep it as is, or re-save with the matching extension" ;;
   esac
-  ok "$out ($(wc -c < "$out" | tr -d ' ') bytes) — from ${src#$CODEX_HOME_DIR/}"
+  # A signature alone is 8 bytes — a truncated or placeholder file passed as "generated" (measured in a real session:
+  # a 14-byte file). For PNG read the IHDR chunk: its width and height must be there and non-zero; any format must be
+  # at least 1 KB. The dimensions are printed so the skill can compare them with what was asked
+  local bytes dims=""; bytes=$(num "$(wc -c < "$out" | tr -d ' ')")
+  if [ "$bytes" -lt 1024 ]; then bad "the image is only ${bytes} bytes — truncated or a placeholder, not a generated image"; rm -rf "$w"; return 1; fi
+  case "$head" in
+    89504e47*)
+      local ihdr; ihdr=$(LC_ALL=C od -An -tx1 -j12 -N12 "$out" 2>/dev/null | tr -d ' \n')
+      case "$ihdr" in 49484452*) ;; *) bad "PNG without an IHDR header: $out"; rm -rf "$w"; return 1 ;; esac
+      local wd ht; wd=$((16#${ihdr:8:8})); ht=$((16#${ihdr:16:8}))
+      if [ "$wd" -eq 0 ] || [ "$ht" -eq 0 ]; then bad "PNG with zero dimensions: ${wd}x${ht}"; rm -rf "$w"; return 1; fi
+      dims=" · ${wd}x${ht}" ;;
+  esac
+  ok "$out (${bytes} bytes${dims}) — from ${src#$CODEX_HOME_DIR/}"
   rm -rf "$w"
   return 0
 }
@@ -351,12 +367,13 @@ self_test() {
   mkdir -p "$t/bin" "$t/codexhome"
   cat > "$t/bin/codex" <<'FAKE'
 #!/bin/bash
-# fake codex: FAKE_LOGIN=0|1 · FAKE_MODE=png|unavailable|workspace-only|none
+# fake codex: FAKE_LOGIN=0|1 · FAKE_MODE=png|tiny|unavailable|workspace-only|none
 case "$1" in
   login) [ "${FAKE_LOGIN:-1}" = 1 ] && { echo "Logged in using ChatGPT"; exit 0; } || { echo "Not logged in"; exit 1; } ;;
-  exec)  out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done; cat >/dev/null
+  exec)  out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done; echo "user"; cat   # echoes the prompt, as codex exec does
          case "${FAKE_MODE:-png}" in
-           png)            mkdir -p "$CODEX_HOME/generated_images/s1"; printf '\211PNG\r\n\032\nfakeimagedata' > "$CODEX_HOME/generated_images/s1/ig_1.png"; echo GENERATED > "$out" ;;
+           png)            mkdir -p "$CODEX_HOME/generated_images/s1"; { printf '\211PNG\r\n\032\n\000\000\000\rIHDR\000\000\004\000\000\000\003\000\010\006\000\000\000'; head -c 2048 /dev/zero; } > "$CODEX_HOME/generated_images/s1/ig_1.png"; echo GENERATED > "$out" ;;
+           tiny)           mkdir -p "$CODEX_HOME/generated_images/s1"; printf '\211PNG\r\n\032\nsample' > "$CODEX_HOME/generated_images/s1/ig_1.png"; echo GENERATED > "$out" ;;
            unavailable)    echo IMAGEGEN_UNAVAILABLE > "$out" ;;
            workspace-only) printf '\211PNG\r\n\032\ndrawn' > ./drawn.png; echo GENERATED > "$out" ;;
            none)           echo GENERATED > "$out" ;;
@@ -375,6 +392,10 @@ FAKE
   ( CODEX_BIN="$FC" CODEX_HOME_DIR="$t/codexhome" CODEX_HOME="$t/codexhome" FAKE_MODE=png codex_generate "a cat" "$t/out/cat.png" 30 ) >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 0 ] && [ "$(LC_ALL=C od -An -tx1 -N4 "$t/out/cat.png" 2>/dev/null | tr -d ' \n')" = 89504e47 ] && ok "Codex image copied from generated_images to --out and verified" \
     || bad "Codex generation path failed (exit $rc)"
+  out=$( ( CODEX_BIN="$FC" CODEX_HOME_DIR="$t/codexhome1" CODEX_HOME="$t/codexhome1" FAKE_MODE=png codex_generate "a cat" "$t/out/d.png" 30 ) 2>&1 )
+  printf '%s' "$out" | grep -q '1024x768' && ok "the PNG's real dimensions are reported (1024x768)" || bad "PNG dimensions not reported" "$(printf '%s' "$out" | tail -1)"
+  ( CODEX_BIN="$FC" CODEX_HOME_DIR="$t/codexhome4" CODEX_HOME="$t/codexhome4" FAKE_MODE=tiny codex_generate "a cat" "$t/out/tiny.png" 30 ) >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 1 ] && ok "a 14-byte 'PNG' (signature only) is refused, not reported as generated" || bad "a truncated placeholder passed as an image (exit $rc)"
   ( CODEX_BIN="$FC" CODEX_HOME_DIR="$t/codexhome2" CODEX_HOME="$t/codexhome2" FAKE_MODE=unavailable codex_generate "a cat" "$t/out/u.png" 30 ) >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 2 ] && [ ! -f "$t/out/u.png" ] && ok "image_gen unavailable in codex exec → exit 2, nothing written (handoff)" || bad "unavailable image_gen not reported as undecidable (exit $rc)"
   ( CODEX_BIN="$FC" CODEX_HOME_DIR="$t/codexhome3" CODEX_HOME="$t/codexhome3" FAKE_MODE=workspace-only codex_generate "a cat" "$t/out/w.png" 30 ) >/dev/null 2>&1; rc=$?

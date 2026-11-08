@@ -42,8 +42,10 @@ num()  { local v; v=$(printf '%s' "${1:-}" | tr -d '[:space:]'); case "$v" in ''
 PLUGIN_ROOT="" PROJECT="" APPLY=0 RETIRE=0 SELFTEST=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --plugin-root) PLUGIN_ROOT="${2:-}"; shift 2 ;;
-    --project)     PROJECT="${2:-}"; shift 2 ;;
+    --plugin-root|--project)
+      # `shift 2` with one argument left fails without shifting — the loop never ended
+      [ $# -ge 2 ] || { printf '%s needs a directory (see --help)\n' "$1" >&2; exit 2; }
+      if [ "$1" = --plugin-root ]; then PLUGIN_ROOT="$2"; else PROJECT="$2"; fi; shift 2 ;;
     --apply)       APPLY=1; shift ;;
     --retire)      RETIRE=1; shift ;;
     --self-test)   SELFTEST=1; shift ;;
@@ -59,10 +61,21 @@ PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$SELF_PLUGIN}}"
 # ── Steps ──────────────────────────────────────────────────────────────
 # Each step adds to PENDING (files an installer would write) or HUMAN (items only a person or a skill can settle).
 
-PENDING=0; HUMAN=0; HUMAN_LIST=""
+PENDING=0; HUMAN=0; HUMAN_LIST=""; UNDEC=0; UNDEC_LIST=""
+# A step that could not be checked is neither "current" nor "behind" — it is reported and never folded into success
+undecided() { UNDEC=$((UNDEC+1)); UNDEC_LIST="${UNDEC_LIST}  - $1"$'\n'; warn "$1" "${2:-}"; }
 human() { HUMAN=$((HUMAN+1)); HUMAN_LIST="${HUMAN_LIST}  - $1"$'\n'; warn "$1" "${2:-}"; }
 
 # "new N · updated M" is the summary line both installers print; summing them is the pending count
+# An installer whose dry run failed, or printed no "new N · updated M" summary, decided nothing — never read that as "current"
+_dry_ok() {  # $1 exit code · $2 output · $3 label → 0 usable · 1 reported undecided
+  if [ "$1" -ne 0 ] || ! printf '%s\n' "$2" | grep -q 'new [0-9]* · updated [0-9]*'; then
+    undecided "$3 could not be checked — the installer failed (exit $1)" "$(printf '%s\n' "$2" | grep -E 'FATAL|ERROR|✗' | head -2 | tr '\n' ' ')"
+    return 1
+  fi
+  return 0
+}
+
 _count_changes() {  # stdin: installer output → number of files it would write
   awk '
     /new [0-9]+ · updated [0-9]+/ { for (i = 1; i <= NF; i++) { if ($i == "new") n += $(i+1); if ($i == "updated") n += $(i+1) } }
@@ -102,7 +115,7 @@ step_config() {
   sec "orangekit.config.json"
   local cfg="$PROJECT/orangekit.config.json"
   if ! command -v jq >/dev/null 2>&1; then
-    warn "jq not installed — config and guide steps are undecidable and were skipped" "install jq (docs/windows-setup.md on Windows) and run again"
+    undecided "jq not installed — orangekit.config.json, stack cards and guides were not checked" "install jq (docs/windows-setup.md on Windows) and run again"
     return 0
   fi
   HAVE_JQ=1
@@ -143,6 +156,7 @@ step_rules() {  # $1 = check|apply
   sec "T1 rule cards · references"
   local out n
   out=$(CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$PROJECT" bash "$PLUGIN_ROOT/scripts/install-rules.sh" --dry-run 2>&1)
+  _dry_ok $? "$out" "T1 rule cards" || return 0
   n=$(num "$(printf '%s\n' "$out" | _count_changes)")
   [ "$1" = check ] && _report_kept "$out"
   if [ "$n" -eq 0 ]; then ok "every T1 card and reference is current"; return 0; fi
@@ -158,7 +172,7 @@ _is_pack() { case "$1" in ""|none|custom|undecided) return 1 ;; *) return 0 ;; e
 
 step_guides() {  # $1 = check|apply
   sec "stack rule cards · guide skills"
-  [ "$HAVE_JQ" -eq 1 ] || { warn "skipped — stack selection unreadable without jq"; return 0; }
+  [ "$HAVE_JQ" -eq 1 ] || { printf '  – not checked (needs jq, see above)\n'; return 0; }
   if ! _is_pack "$FE" && ! _is_pack "$BE" && ! _is_pack "$APP"; then ok "no stack pack selected — nothing to install"; return 0; fi
   # Guide skills already installed → refresh them too (same-premise fixes only; install-guide.sh pins the rest).
   # None installed → stack rule cards only, init's default — the update does not opt the project into guides
@@ -167,6 +181,7 @@ step_guides() {  # $1 = check|apply
   [ -f "$PROJECT/.orangekit/preset-notes.json" ] && args+=(--notes "$PROJECT/.orangekit/preset-notes.json")
   local out n pinned
   out=$(CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$PROJECT" bash "$PLUGIN_ROOT/scripts/install-guide.sh" "${args[@]}" --dry-run 2>&1)
+  _dry_ok $? "$out" "$mode" || return 0
   pinned=$(printf '%s\n' "$out" | grep -E '^[[:space:]]*state:' | grep -oE '[a-z]+=pinned' | cut -d= -f1 | tr '\n' ' ')
   [ -n "$pinned" ] && human "guide premise moved for: ${pinned}— not updated" "move it across with /stack-guide-generator when the project raises that dependency"
   n=$(num "$(printf '%s\n' "$out" | _count_changes)")
@@ -180,20 +195,33 @@ step_guides() {  # $1 = check|apply
   ok "updated $n $mode files"; printf '%s\n' "$out" | _show_changes
 }
 
+# Is version $1 newer than $2 (x.y.z, numeric per part)? Same rule as the installers' ver_gt
+ver_gt() { awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, "."); for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'; }
+
 step_retired() {  # $1 = check|apply
   sec "cards the plugin no longer ships"
-  local c base stack axis pack list="" n=0 exp dst
+  local c base stack axis pack list="" n=0 exp dst newest="" v newer=""
+  # An empty plugin rules/ would make every stamped card look retired — decide nothing then
+  if ! ls "$PLUGIN_ROOT"/rules/*.md >/dev/null 2>&1; then undecided "the plugin ships no rules/*.md — retired cards not checked"; return 0; fi
+  # A card stamped newer than every card this plugin ships came from a newer plugin (the no-downgrade case) — not retired
+  for c in "$PLUGIN_ROOT"/rules/*.md; do
+    v=$({ grep -m1 -oE 'orangekit-rule-version: [0-9]+\.[0-9]+\.[0-9]+' "$c" 2>/dev/null || true; } | awk '{print $2}')
+    [ -n "$v" ] && { [ -z "$newest" ] || ver_gt "$v" "$newest"; } && newest=$v
+  done
   for c in "$PROJECT"/.claude/rules/*.md; do
     [ -f "$c" ] || continue
     grep -q 'orangekit-rule-version:' "$c" 2>/dev/null || continue     # no stamp = project-owned, never ours to retire
     base=$(basename "$c")
     [ -f "$PLUGIN_ROOT/rules/$base" ] && continue
+    v=$({ grep -m1 -oE 'orangekit-rule-version: [0-9]+\.[0-9]+\.[0-9]+' "$c" 2>/dev/null || true; } | awk '{print $2}')
+    if [ -n "$newest" ] && [ -n "$v" ] && ver_gt "$v" "$newest"; then newer="$newer $base"; continue; fi
     case "$base" in
       stack-*-*.md) stack=${base#stack-}; stack=${stack%.md}; axis=${stack%%-*}; pack=${stack#*-}
                     [ -f "$PLUGIN_ROOT/guides/$axis/$pack/RULES.md" ] && continue ;;
     esac
     list="$list $base"; n=$((n+1))
   done
+  [ -n "$newer" ] && [ "$1" = check ] && warn "kept (newer than any card this plugin ships — set up by a newer plugin):$newer"
   if [ "$n" -eq 0 ]; then ok "none"; return 0; fi
   if [ "$1" = apply ] && [ "$RETIRE" -eq 1 ]; then
     # Retirement protocol (rules/harness-change.md): a shadow with an expiry date, not a deletion
@@ -232,23 +260,30 @@ main() {
   if [ "$APPLY" -eq 0 ]; then
     run check
     sec "summary"
-    if [ "$PENDING" -eq 0 ] && [ "$HUMAN" -eq 0 ]; then ok "up to date with v${ver:-?}"; exit 0; fi
+    if [ "$PENDING" -eq 0 ] && [ "$HUMAN" -eq 0 ] && [ "$UNDEC" -eq 0 ]; then ok "up to date with v${ver:-?}"; exit 0; fi
     [ "$PENDING" -gt 0 ] && printf '  %s file(s) behind v%s — run again with --apply\n' "$PENDING" "${ver:-?}"
     [ "$HUMAN" -gt 0 ] && printf '  %s item(s) need a person:\n%s' "$HUMAN" "$HUMAN_LIST"
+    [ "$UNDEC" -gt 0 ] && printf '  %s step(s) could not be checked:\n%s' "$UNDEC" "$UNDEC_LIST"
     exit 1
   fi
 
   run apply
   # Verify — "the installer ran" is not "the project is current". Check again from scratch
   local applied_fail=$FAIL
-  PENDING=0; HUMAN=0; HUMAN_LIST=""
+  PENDING=0; HUMAN=0; HUMAN_LIST=""; UNDEC=0; UNDEC_LIST=""
   sec "verification (check again)"
   run check >/dev/null 2>&1
   sec "summary"
   if [ "$applied_fail" -gt 0 ]; then bad "an installer failed — see above"; exit 1; fi
   if [ "$PENDING" -gt 0 ]; then bad "$PENDING file(s) still behind after the update" "an installer skipped them — run without --apply to see which"; exit 1; fi
-  ok "every plugin-installed file matches v${ver:-?}"
+  if [ "$UNDEC" -gt 0 ]; then
+    ok "every file that could be checked matches v${ver:-?}"
+    printf '  %s step(s) could not be checked — not verified:\n%s' "$UNDEC" "$UNDEC_LIST"
+  else
+    ok "every plugin-installed file matches v${ver:-?}"
+  fi
   if [ "$HUMAN" -gt 0 ]; then printf '  %s item(s) still need a person:\n%s' "$HUMAN" "$HUMAN_LIST"; exit 1; fi
+  [ "$UNDEC" -gt 0 ] && exit 1
   exit 0
 }
 
@@ -268,6 +303,8 @@ self_test() {
   printf '<!-- orangekit-rule-version: 1.0.0 -->\n# a card the plugin stopped shipping\n' > "$P/.claude/rules/old-card.md"
   printf '# project structure — written by the team\n' > "$P/.claude/rules/project-structure.md"
   local sum_ps; sum_ps=$(cksum < "$P/.claude/rules/project-structure.md")
+  _tree() { (cd "$1" && find .claude -type f -exec cksum {} \; 2>/dev/null | LC_ALL=C sort); }
+  local tree0; tree0=$(_tree "$P")
 
   sec "check on an older layout"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" 2>&1); rc=$?
@@ -277,8 +314,7 @@ self_test() {
   printf '%s' "$out" | grep -q 'stack-frontend-nextjs.md' && ok "the stack rule card an older version never installed is listed" \
     || bad "stack rule card not listed"
   printf '%s' "$out" | grep -q 'no longer ships:.*old-card.md' && ok "the retired card is reported" || bad "retired card not reported"
-  [ "$(cksum < "$P/.claude/rules/workflow-routing.md" | cut -d' ' -f1)" != "" ] && grep -q 'version: 0.0.1' "$P/.claude/rules/workflow-routing.md" \
-    && ok "check changed nothing" || bad "check modified a file"
+  [ "$(_tree "$P")" = "$tree0" ] && ok "check changed nothing (whole .claude tree compared)" || bad "check modified a file under .claude"
 
   sec "apply"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --apply 2>&1); rc=$?
@@ -317,6 +353,39 @@ self_test() {
   bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$N" --apply >/dev/null 2>&1
   grep -q 'orangekit-rule-version: 99.0.0' "$N/.claude/rules/security.md" && grep -q 'frontend/nextjs v99.0.0' "$N/.claude/rules/stack-frontend-nextjs.md" \
     && ok "apply does not downgrade them" || bad "apply downgraded a newer copy"
+
+  sec "no jq: unchecked steps are not reported as success"
+  local NJ="$T/nojq-bin" d f; mkdir -p "$NJ"
+  for d in /bin /usr/bin /usr/local/bin /opt/homebrew/bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do [ "$(basename "$f")" = jq ] && continue; [ -e "$NJ/$(basename "$f")" ] || ln -s "$f" "$NJ/$(basename "$f")" 2>/dev/null; done
+  done
+  if PATH="$NJ" command -v jq >/dev/null 2>&1; then
+    warn "could not build a PATH without jq on this host — case unverified"
+  else
+    local J="$T/nojq"; mkdir -p "$J"
+    printf '{"techStack":{"presets":{"frontend":"nextjs","backend":"none","app":"none"}}}\n' > "$J/orangekit.config.json"
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$J" bash "$PLUGIN_ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+    out=$(PATH="$NJ" bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$J" --apply 2>&1); rc=$?
+    [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'could not be checked' && ! printf '%s' "$out" | grep -q 'every plugin-installed file matches' \
+      && ok "no jq → apply exits 1 and names the unchecked steps instead of claiming success" \
+      || bad "no jq → success claimed for steps that never ran (exit $rc)" "$(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  fi
+
+  sec "failures are not read as success"
+  ( perl -e 'alarm 5; exec @ARGV' bash "$0" --plugin-root ) >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "--plugin-root with no value → exit 2 (no endless loop)" || bad "--plugin-root with no value → exit $rc (142 = it looped until killed)"
+  local FP="$T/brokenplugin"; mkdir -p "$FP/scripts" "$FP/rules"
+  printf '#!/bin/bash\necho "FATAL: broken installer" >&2; exit 2\n' > "$FP/scripts/install-rules.sh"; cp "$FP/scripts/install-rules.sh" "$FP/scripts/install-guide.sh"
+  printf '<!-- orangekit-rule-version: 1.0.0 -->\n' > "$FP/rules/a.md"
+  out=$(bash "$0" --plugin-root "$FP" --project "$P" 2>&1); rc=$?
+  [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'installer failed' && ! printf '%s' "$out" | grep -q 'up to date' \
+    && ok "an installer that fails → exit 1 'could not be checked', never 'up to date'" || bad "a failing installer read as success (exit $rc)" "$(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  local F6="$T/future"; mkdir -p "$F6"; printf '{}\n' > "$F6/orangekit.config.json"
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$F6" bash "$PLUGIN_ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+  printf '<!-- orangekit-rule-version: 99.0.0 -->\n# a card from a newer plugin\n' > "$F6/.claude/rules/future-card.md"
+  bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$F6" --apply --retire >/dev/null 2>&1
+  [ -f "$F6/.claude/rules/future-card.md" ] && ok "--retire keeps a card stamped newer than anything this plugin ships" || bad "--retire moved a newer plugin's card away"
 
   sec "what it refuses to guess"
   mkdir -p "$T/v2/.claude/hooks"; : > "$T/v2/.claude/hooks/stop-guard.sh"; printf '{}\n' > "$T/v2/orangekit.config.json"

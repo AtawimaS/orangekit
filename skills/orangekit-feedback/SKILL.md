@@ -15,13 +15,24 @@ question is not a yes.
 ## Step 0: Drafted reports come first
 
 `session-brief` drafts a report for each new orangekit hook error into `.claude/.orangekit/feedback-drafts/<id>.md`
-and shows it as "✱ Bug report drafted". If that folder holds drafts, work through them before anything else:
+and shows it as "✱ Bug report drafted". The queue is handled **only through the bundled script** — Claude Code guards
+direct writes under `.claude/`, so a hand-written `mkdir`/`mv` there stalls on a permission:
+
+```bash
+D="${CLAUDE_SKILL_DIR}/scripts/drafts.sh"
+bash "$D" list                     # <id><TAB><title> per queued draft (exit 1 = none)
+bash "$D" show <id>                # the draft text
+bash "$D" mark <id> sent           # after filing
+bash "$D" mark <id> dismissed      # after Dismiss
+```
+
+If drafts are queued, work through them before anything else:
 
 1. For each draft, run Steps 1–3 with the draft as the starting text (its title, "What happened" and "Expected" are already
    filled; add only the environment and the error record).
 2. Step 3 offers **File it · Edit · Dismiss** instead of Cancel.
-3. After filing, move the draft to `feedback-drafts/sent/`; after Dismiss, to `feedback-drafts/dismissed/`.
-   `session-brief` never drafts the same error again once its file is in either folder, so do not delete them.
+3. After filing, `mark <id> sent`; after Dismiss, `mark <id> dismissed`. `session-brief` never drafts the same error
+   again once it is marked, so do not delete drafts.
 
 With no drafts, start at Step 1.
 

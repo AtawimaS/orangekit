@@ -276,6 +276,7 @@ if [ -n "${PLUG_VER:-}" ]; then
     # the numbering schemes differ, so it always differed and "there are guide fixes" showed every session for guides with nothing to fix
     CUR=$({ grep -m1 -oE '"packVersion"[[:space:]]*:[[:space:]]*"[0-9.]+"' "$PJ" 2>/dev/null || true; } | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
     [ -n "${PKV:-}" ] && [ "$PKV" = "${CUR:-}" ] && continue
+    [ -n "${PKV:-}" ] && [ -n "${CUR:-}" ] && orangekit_ver_gt "$PKV" "$CUR" && continue   # newer than the plugin — kept, not a fix to apply
     # Wire contract move — install-guide.sh does not update this installed copy (contract pinning). Without the same
     # verdict here, it would recommend every session an update command that will be refused
     HAVEC=$({ grep -m1 -oE '"wireContract"[[:space:]]*:[[:space:]]*"[^"]*"' "$AJ" 2>/dev/null || true; } | sed -E 's/.*"([^"]*)"$/\1/')
@@ -396,7 +397,8 @@ PYDEP
       SRC="$PLUGIN_ROOT/rules/$(basename "$RC")"; [ -f "$SRC" ] || continue
       SV=$({ grep -m1 -oE 'orangekit-rule-version: [0-9.]+' "$SRC" 2>/dev/null || true; } | awk '{print $2}')
       TV=$({ grep -m1 -oE 'orangekit-rule-version: [0-9.]+' "$RC"  2>/dev/null || true; } | awk '{print $2}')
-      [ -n "${SV:-}" ] && [ -n "${TV:-}" ] && [ "$SV" != "$TV" ] && RDRIFT=$((RDRIFT+1))
+      # Older only: a card newer than the plugin's is kept by install-rules.sh (no downgrade), so counting it nagged forever
+      [ -n "${SV:-}" ] && [ -n "${TV:-}" ] && orangekit_ver_gt "$SV" "$TV" && RDRIFT=$((RDRIFT+1))
     done
     [ "$RDRIFT" -gt 0 ] && printf -- '- %s T1 rule cards are on an old version — `/orangekit-update` brings every plugin-installed file along (cards · references · stack cards · guides)\n' "$RDRIFT"
     # A new card appeared in the plugin but is absent from the project (the drift loop cannot catch this).

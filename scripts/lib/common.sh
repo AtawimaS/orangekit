@@ -67,6 +67,9 @@ orangekit_slashes() {  # $1 path → printed with / separators
   printf '%s' "$p"
 }
 
+# Is version $1 newer than $2 (x.y.z, numeric per part)? Same rule as ver_gt in the installers, which do not source this file
+orangekit_ver_gt() { awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN { split(a, x, "."); split(b, y, "."); for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'; }
+
 orangekit_root() {
   local input="${1:-}" root=""
 

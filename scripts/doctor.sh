@@ -56,6 +56,16 @@ sec()  { printf "\n${C_D}── %s ───────────────
 
 num() { local v; v=$(printf '%s' "${1:-}" | tr -d '[:space:]'); case "$v" in ''|*[!0-9]*) printf '0';; *) printf '%s' "$v";; esac; }
 
+# `env -i` for the hook fixtures, keeping what a native Windows program needs to start. jq.exe launched with no SYSTEMROOT
+# returned nothing, every hook input read as empty, and the knowledge-gate fixtures all "passed" on windows-latest
+_envi() {
+  local keep=() v
+  for v in SYSTEMROOT WINDIR TEMP TMP COMSPEC PATHEXT; do
+    eval "[ -n \"\${$v:-}\" ] && keep+=(\"$v=\${$v}\")"
+  done
+  env -i ${keep[@]+"${keep[@]}"} "$@"
+}
+
 # The T0 budget is canonical **in this one place**. After the check rose to 42 the card body was left quoting "40 lines" —
 # the numbers a document quotes are compared against this constant by "declared ↔ real" (evaluation v6 · E-25).
 T0_BUDGET=42
@@ -321,6 +331,12 @@ run_fast() {
     ok "every variable expansion ends on ASCII (bash 3.2 safe)"
   fi
 
+  # A hook that sets ORANGEKIT_ROOT itself must pass it through orangekit_slashes (or take it from orangekit_root): on Windows a
+  # C:\ root never prefixes the normalized C:/ file paths, and the knowledge gate then finds no owner (fail-open)
+  local rr; rr=$(grep -nE '^[[:space:]]*ORANGEKIT_ROOT=' scripts/*.sh 2>/dev/null | grep -v '^scripts/doctor.sh:' | grep -vE 'orangekit_slashes|orangekit_root' || true)
+  [ -z "$rr" ] && ok "every hook root goes through orangekit_slashes / orangekit_root (Windows C:\\ paths)" \
+    || bad "hook root not normalized: $(printf '%s' "$rr" | cut -d: -f1,2 | tr '\n' ' ')" "wrap it: ORANGEKIT_ROOT=\$(orangekit_slashes \"…\")"
+
   # Windows shims live in scripts/lib/win-compat.sh. Every shipped script that calls jq or python3 must load it — directly,
   # or through common.sh — or on Windows its values carry a \r (measured on windows-latest: doctor read every graph path
   # as "missing"). The orangekit-harness plugin ships without scripts/, so its copies must equal the canonical block
@@ -350,9 +366,11 @@ run_fast() {
   # way turns `fi` into `fi\r`: every hook dies with "command not found" and an agent's frontmatter stops parsing.
   # Measured on a fork checked out on Windows and run on macOS: self-test 54 pass · 50 fail, security-check exit 2 on
   # every call. .gitattributes pins eol=lf for checkouts; this proves no file slipped past it (an archive, a copy, an editor).
-  local crlf="" cr; cr=$(printf '\r')
+  # Counted with tr, byte for byte: grep on Git Bash strips a trailing CR in text mode, so a grep-based guard saw no CRLF
+  # on Windows — the one platform where it matters (measured on windows-latest)
+  local crlf=""
   while IFS= read -r f; do
-    LC_ALL=C grep -q "$cr" "$f" 2>/dev/null && crlf="$crlf$f"$'\n'
+    [ "$(LC_ALL=C tr -dc '\r' < "$f" 2>/dev/null | wc -c | tr -d ' ')" -gt 0 ] && crlf="$crlf$f"$'\n'
   done < <(find scripts hooks agents rules skills harness marketing templates presets schema references \
              \( -name '*.sh' -o -name '*.md' -o -name '*.json' -o -name '*.jsonl' -o -name '*.py' -o -name '*.hbs' \) \
              -type f 2>/dev/null || true)
@@ -1941,7 +1959,7 @@ run_self_test() {
       sdcode=0
       # Look at stderr too — even when the verdict is right, if the ERR trap rang the hook tripped midway
       sderr=$(jq -nc --arg c "$sdcmd" '{tool_name:"Bash",tool_input:{command:$c}}' \
-        | env -i PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sddir" ORANGEKIT_STATE_DIR="$sddir/.state" \
+        | _envi PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sddir" ORANGEKIT_STATE_DIR="$sddir/.state" \
             ${sdenv:+DATABASE_URL="$sdenv"} bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || sdcode=$?
       if [ "$sdcode" = "$sdwant" ] && ! printf '%s' "$sderr" | grep -q 'ERROR line'; then
         sdok=$((sdok+1))
@@ -1999,7 +2017,7 @@ STUB
       tdpath="$td/bin:$PATH"; [ "$3" = nostub ] && tdpath="$PATH"; [ "$3" = noenvurl ] && tdurl=""
       tdcode=0
       tderr=$(jq -nc --arg c "$4" '{tool_name:"Bash",tool_input:{command:$c}}' \
-        | env -i PATH="$tdpath" HOME="$HOME" CLAUDE_PROJECT_DIR="$td/proj" ORANGEKIT_STATE_DIR="$td/proj/.state" FAKE_PSQL_DIR="$td/tbl" ${tdurl:+DATABASE_URL="$tdurl"} \
+        | _envi PATH="$tdpath" HOME="$HOME" CLAUDE_PROJECT_DIR="$td/proj" ORANGEKIT_STATE_DIR="$td/proj/.state" FAKE_PSQL_DIR="$td/tbl" ${tdurl:+DATABASE_URL="$tdurl"} \
             bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || tdcode=$?
       # Even when the verdict is right, an ERR trap that fired means the hook tripped midway, and a block must come for the **intended reason** (data destruction)
       if [ "$tdcode" = "$1" ] && ! printf '%s' "$tderr" | grep -q 'ERROR line' \
@@ -2126,7 +2144,7 @@ CASES
       [ -n "$skkind" ] || continue
       skcode=0
       skerr=$(jq -nc --arg c "$skc" '{tool_name:"Bash",tool_input:{command:$c}}' \
-        | env -i PATH="$sk/$skkind:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sk/proj" ORANGEKIT_STATE_DIR="$sk/proj/.state" \
+        | _envi PATH="$sk/$skkind:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$sk/proj" ORANGEKIT_STATE_DIR="$sk/proj/.state" \
             bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || skcode=$?
       if [ "$skcode" = "$skw" ] && ! printf '%s' "$skerr" | grep -q 'ERROR line' \
          && { [ "$skw" = 0 ] || printf '%s' "$skerr" | grep -q 'own shell'; }; then skok=$((skok+1))
@@ -2164,7 +2182,7 @@ SKCASES
     chmod +x "$psd/procps/pkill" "$psd/bsd/pkill"
     for ps_t in procps bsd; do
       : > "$psd/env-$ps_t"
-      printf '{"session_id":"s-a"}' | env -i PATH="$psd/$ps_t:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-$ps_t" \
+      printf '{"session_id":"s-a"}' | _envi PATH="$psd/$ps_t:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-$ps_t" \
         CLAUDE_ENV_FILE="$psd/env-$ps_t" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/session-brief.sh" >/dev/null 2>&1
     done
     if grep -qxF "export PATH=\"$ROOT/bin:\$PATH\"" "$psd/env-procps" && [ "$(cat "$psd/proj/.state-procps/proc-shim/s-a" 2>/dev/null)" = "$ROOT/bin" ] \
@@ -2175,7 +2193,7 @@ SKCASES
     for ps_case in "s-a 0 still blocks although this session's marker and wrappers exist" "s-b 2 another session's marker switches the check off (parallel sessions)" "s-old 2 a marker pointing at vanished wrappers switches the check off (plugin update)"; do
       ps_sid=${ps_case%% *}; ps_want=${ps_case#* }; ps_want=${ps_want%% *}; ps_code=0
       ps_err=$(jq -nc --arg s "$ps_sid" '{session_id:$s,tool_name:"Bash",tool_input:{command:"pkill -f \"node server.mjs\"; npm run build"}}' \
-        | env -i PATH="$psd/procps:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-procps" \
+        | _envi PATH="$psd/procps:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$psd/proj" ORANGEKIT_STATE_DIR="$psd/proj/.state-procps" \
             bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || ps_code=$?
       # When it blocks, it must block for the intended reason
       if [ "$ps_code" != "$ps_want" ] || { [ "$ps_want" = 2 ] && ! grep -q 'kills its own shell' <<<"$ps_err"; }; then
@@ -2185,7 +2203,10 @@ SKCASES
   }
   rm -rf "${psd:-/nonexistent}"
   ps_ver=$(pkill --version 2>&1) || true
+  # Git Bash ships a procps pkill too, but the proof fixture is Linux process semantics (/proc, exec -a) — not applicable there
+  case "${OSTYPE:-}" in msys*|cygwin*|win*) ps_ver="windows" ;; esac
   case "$ps_ver" in
+    windows) ps_proof="" ;;
     *procps*) ps_out=$(bash "$ROOT/scripts/fixtures/proc-shim-linux.sh" "$ROOT" 2>&1) && ps_proof="this host (procps)" || ps_proof=fail ;;
     *) # run both paths — a version with `--ignore-ancestors` (debian bookworm 4.0.2) and one without (ubuntu 22.04 3.3.17, filtered here)
        if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -2198,6 +2219,8 @@ SKCASES
   esac
   if [ "$ps_proof" = fail ]; then
     ps_bad=1; bad "proc-shim: Linux procps proof failed — $(printf '%s' "$ps_out" | grep -E 'FAIL|pass [0-9]' | head -3 | tr '\n' ' ')" "run scripts/fixtures/proc-shim-linux.sh directly"
+  elif [ -z "$ps_proof" ] && [ "$ps_ver" = windows ]; then
+    warn "proc-shim: Linux procps proof not applicable on Windows — unverified here" "the wrappers target Linux procps; run the proof on Linux: bash scripts/fixtures/proc-shim-linux.sh \"\$PWD\""
   elif [ -z "$ps_proof" ]; then
     warn "proc-shim: Linux procps proof unverified — no procps host and no docker" "on Linux: bash scripts/fixtures/proc-shim-linux.sh \"\$PWD\""
   fi
@@ -2244,7 +2267,7 @@ SKCASES
         '{session_id:$s,cwd:$cwd,tool_name:$t,hook_event_name:"PreToolUse"}
          + (if $t=="Bash" then {tool_input:{command:$a}} else {tool_input:{file_path:$a,content:"x",old_string:"a",new_string:"b"}} end)
          + (if $tp=="-" then {} else {transcript_path:$tp} end)' \
-        | env -i PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$nd" ORANGEKIT_STATE_DIR="$nd/.state" CLAUDE_PLUGIN_ROOT="$ROOT" \
+        | _envi PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$nd" ORANGEKIT_STATE_DIR="$nd/.state" CLAUDE_PLUGIN_ROOT="$ROOT" \
             bash "$ROOT/scripts/security-check.sh" >"$nd/out" 2>"$nd/err"
     }
     _gcase() {
@@ -2426,7 +2449,7 @@ FXP
         'unguarded grep -c' 'cat "$T/../plant-grepc" >> "$T/scripts/guarded.sh"'
       _fx_static_case "$sfx" var-nonascii 'scripts/guarded.sh' 'a→' \
         'non-ASCII after' 'cat "$T/../plant-arrow" >> "$T/scripts/guarded.sh"'
-      _fx_static_case "$sfx" crlf-script 'scripts/crlf.sh' "$(printf '\r')" \
+      _fx_static_case "$sfx" crlf-script 'scripts/crlf.sh' '^exit 0' \
         'CRLF line endings' 'printf "#!/bin/bash\\r\\nexit 0\\r\\n" > "$T/scripts/crlf.sh"'
 
       _fx_static_case "$sfx" always-rule   'rules/workflow-routing.md' '^paths:' \
@@ -2738,6 +2761,19 @@ FXP
     rm -rf "$ws"
   fi
 
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|win*)
+      # On a real Windows shell a simulation proves nothing — check the real jq.exe / python through the shims
+      sec "Windows: Python and jq through the shims (this host)"
+      local wj wpy2
+      wj=$(bash -c 'source "$1" >/dev/null 2>&1; printf "{\"a\":\"x\"}" | jq -r .a' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+      [ "$wj" = x ] && ok "jq output carries no \\r on this Windows host" || bad "jq output on Windows still carries a CR (got '$(printf '%s' "$wj" | od -c | head -1)')"
+      wpy2=$(bash -c 'source "$1" >/dev/null 2>&1; python3 -c "print(6*7)"' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+      if [ "$wpy2" = 42 ]; then ok "python3 resolves to a working Python with no \\r on this Windows host"
+      elif ! python -c 'import sys' >/dev/null 2>&1 && ! py -3 -c 'import sys' >/dev/null 2>&1; then warn "no Python installed on this Windows host — resolution unverified"
+      else bad "python3 does not resolve to a working Python on Windows (got '$(printf '%s' "$wpy2" | od -c | head -1)')"; fi ;;
+  esac
+  case "${OSTYPE:-}" in msys*|cygwin*|win*) ;; *)
   sec "Windows: Python and jq resolution (simulated Git Bash)"
   # OSTYPE=msys + a python3 that behaves like the Microsoft Store alias (exit 9009) + a python and a jq that end lines with
   # CRLF, as native Windows builds do. The resolver must pick the working python and strip the \r from both
@@ -2759,6 +2795,21 @@ FXP
     wpy=$(OSTYPE=darwin PATH="$wb:$PATH" bash -c 'source "$1" >/dev/null 2>&1; type -t python3' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
     [ "$wpy" = file ] && ok "  …and outside a Windows shell nothing is wrapped" || bad "the Windows resolver ran on a non-Windows shell (python3 is a $wpy)"
     rm -rf "$wb"
+  fi ;;
+  esac
+
+  sec "rule-card drift counts only older copies"
+  local dp dbo
+  dp=$(mktemp -d 2>/dev/null) || dp=""
+  if [ -n "$dp" ]; then
+    printf '{}\n' > "$dp/orangekit.config.json"; ( cd "$dp" && git init -q ) >/dev/null 2>&1
+    CLAUDE_PROJECT_DIR="$dp" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+    sed 's/orangekit-rule-version: [0-9.]*/orangekit-rule-version: 99.0.0/' "$dp/.claude/rules/security.md" > "$dp/x" && mv "$dp/x" "$dp/.claude/rules/security.md"
+    sed 's/orangekit-rule-version: [0-9.]*/orangekit-rule-version: 0.0.1/' "$dp/.claude/rules/lessons.md" > "$dp/x" && mv "$dp/x" "$dp/.claude/rules/lessons.md"
+    dbo=$(printf '{}' | ORANGEKIT_STATE_DIR="$dp/.st" CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$dp" bash "$ROOT/scripts/session-brief.sh" 2>/dev/null || true)
+    if grep -q '1 T1 rule cards are on an old version' <<< "$dbo"; then ok "one newer + one older card → 1 reported (a newer copy is kept, not nagged about)"
+    else bad "drift count wrong: $(grep -o '[0-9]* T1 rule cards are on an old version' <<< "$dbo" || echo none)" "a card newer than the plugin's would be nagged about every session"; fi
+    rm -rf "$dp"
   fi
 
   sec "Windows paths (Git Bash)"

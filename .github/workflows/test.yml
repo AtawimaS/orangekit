@@ -32,7 +32,8 @@ jobs:
       - name: Shipped scripts are LF after checkout
         run: |
           # Actions runs bash with -e -o pipefail: grep -l exits 1 on a clean file, so it is guarded
-          crlf=$(git ls-files '*.sh' | while IFS= read -r f; do { grep -l "$(printf '\r')" "$f" 2>/dev/null || true; }; done)
+          # tr counts bytes: Git Bash grep strips a trailing CR in text mode and would see none
+          crlf=$(git ls-files '*.sh' | while IFS= read -r f; do [ "$(tr -dc '\r' < "$f" | wc -c)" -gt 0 ] && echo "$f"; done || true)
           [ -z "$crlf" ] || { echo "CRLF in: $crlf"; exit 1; }
 
       - name: doctor --default
@@ -47,6 +48,8 @@ jobs:
           bash skills/skill-enhancer/scripts/skill-lint.sh skills/*/ marketing/skills/*/ harness/skills/*/
       - name: orangekit-update --self-test
         run: bash skills/orangekit-update/scripts/orangekit-update.sh --self-test
+      - name: orangekit-feedback drafts --self-test
+        run: bash skills/orangekit-feedback/scripts/drafts.sh --self-test
       - name: image-gen --self-test
         run: bash skills/image-generator/scripts/image-gen.sh --self-test
       - name: guide-gate --self-test

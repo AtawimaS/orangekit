@@ -993,10 +993,12 @@ FXJSX
     bad "the JSX whole file is not in the real tree" "it was restored but not placed in the typecheck target tree — even with tsc it is never checked"
   fi
   fi
+  if _needs node "an extensionless import resolves to the shipped .tsx"; then   # without node .orphan.txt is never written — a ✓ was vacuous
   if grep -q 'Badge' "$fx/out-jsx/.orphan.txt" 2>/dev/null; then
     bad "an extensionless import misjudged a shipped .tsx as an orphan" "$(tr '\n' ';' < "$fx/out-jsx/.orphan.txt")"
   else
     ok "an extensionless import resolves to the .tsx the pack shipped (no orphan misjudgment)"
+  fi
   fi
   if grep -qE '^export declare const ApiError: \(new ' "$fx/out-jsx/src/api/http.ts" 2>/dev/null; then
     ok "the seam stub carries a construct signature (instanceof narrows unknown)"

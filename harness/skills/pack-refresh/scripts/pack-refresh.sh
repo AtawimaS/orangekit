@@ -86,7 +86,8 @@ do_verify() {
 do_bump() {
   local P="${1:-}" V="${2:-}" rec today pkgs id changed f
   [ -f "$P/pack.json" ] || { printf 'not a pack directory: %s\n' "$P" >&2; exit 2; }
-  case "$V" in [0-9]*.[0-9]*.[0-9]*) ;; *) printf 'version must look like x.y.z: %s\n' "$V" >&2; exit 2;; esac
+  # Digits and two dots only — the value goes into sed replacements (a glob let `1.2.3/x` or `1.2.3&` through)
+  printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { printf 'version must look like x.y.z: %s\n' "$V" >&2; exit 2; }
   rec=$(record_file "$P") || { printf 'no git repository at %s\n' "$REPO" >&2; exit 2; }
   sec "bump $P → $V"
   if [ ! -f "$rec" ]; then
@@ -96,7 +97,9 @@ do_bump() {
     bad "refused: the pack changed after it was verified" "run --verify again on the current content"; return
   fi
   today=$(date -u +%Y-%m-%d)
-  pkgs=$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("pkgs") or []))' "$P/pack.json" | tr -d '\r')
+  pkgs=$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("pkgs") or []))' "$P/pack.json" | tr -d '\r') \
+    || { bad "refused: could not read pkgs from pack.json (python3)" "the PACK.md stamp would be written with no packages"; return; }
+  [ -n "$pkgs" ] || { bad "refused: pack.json has no pkgs" "the PACK.md stamp records the verified majors — it cannot be empty"; return; }
   id=$(printf '%s' "$P" | sed 's#.*guides/##; s#/*$##')
   # Stamps follow the files that changed since the last commit, plus PACK.md, whose stamp carries the pkgs
   changed=$( { git -C "$REPO" diff --name-only HEAD -- "$P" 2>/dev/null; git -C "$REPO" ls-files --others --exclude-standard -- "$P" 2>/dev/null; } \
@@ -153,6 +156,8 @@ self_test() {
   else
     bad "the bump did not update pack.json and the stamps" "$out"
   fi
+  out=$(run pass.sh --bump "$p" '1.2.3&x' 2>&1); local vrc=$?
+  [ "$vrc" -eq 2 ] && ok "a version with sed metacharacters (1.2.3&x) is refused (exit 2)" || bad "a malformed version reached sed (exit $vrc)"
   out=$(run pass.sh --bump "$p" 1.2.0)
   case "$out" in *"not verified"*) ok "one verification allows one bump" ;; *) bad "a second bump went through on the old verification" "$out" ;; esac
   rm -rf "$t"
