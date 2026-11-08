@@ -298,10 +298,17 @@ _policy_rows_look_present() { # $1=policy file
 # **Type symbols in a JS pack are declared only in JSDoc comments** — `iscomment()` drops lines starting with `*`,
 # so such a declaration **cannot exist** in codelines(). Measured on vanilla (the first JavaScript axis):
 # `Task` FAILed as "no definition" even though it was defined. That is where the checker knew only one language.
+# grep reads a here-string, not a pipe: `codelines | cut | grep -q` under pipefail returned 141 once the code passed the pipe buffer
+# (~64 KB) and the match came early — a defined symbol read as "no definition", a forbidden example as absent (N4)
 _has_def() { # $1=file $2=symbol
-  codelines "$1" | cut -f3 | grep -qE "$(_defpat "$2")" && return 0
+  grep -qE "$(_defpat "$2")" <<<"$(codelines "$1" | cut -f3)" && return 0
   grep -qE "@typedef[[:space:]]*\{.*\}[[:space:]]*$2\b|@typedef[[:space:]]+$2\b" "$1" && return 0
   return 1
+}
+
+_code_has_fixed() { # $1=literal $2…=files → 0 if a code line of those files contains the literal (same here-string reason as _has_def)
+  local lit="$1"; shift
+  grep -qF -- "$lit" <<<"$(codelines "$@" | cut -f3)"
 }
 
 _defpat() { # $1=symbol name → grep -E pattern
@@ -831,7 +838,7 @@ check_policy_proof() {
       targets=$(_policy_targets "$G" "$scope" "$except" "$packfiles")
       if [ -z "$targets" ]; then skip=$((skip+1)); pass=$((pass+1)); continue; fi
       # shellcheck disable=SC2086
-      if codelines $targets | cut -f3 | grep -qF -- "$ex" 2>/dev/null; then
+      if _code_has_fixed "$ex" $targets 2>/dev/null; then
         bad "policy '$id' — the proof example really exists in the body" "an example of the forbidden pattern is on a code line = it violates its own policy"
         viol=$((viol+1)); continue
       fi
@@ -2161,6 +2168,18 @@ run_self_test() {
   _fx_assert "$fx/clean/sample-backend-guide"     1 "package manager mismatch"  --generated --pm pnpm
   _fx_assert "$fx/clean/sample-backend-guide"     1 "ledger mismatch (consumer absent)" --generated --ledger "$fx/clean/ledger-bad.md"
   _fx_assert "$fx/clean/sample-backend-guide"     1 "symbol not entered in the ledger"      --generated --ledger "$fx/clean/ledger-short.md"
+
+  sec "code larger than the pipe buffer (SIGPIPE under pipefail)"
+  # A definition and a forbidden example on the FIRST code line of a ~270 KB resource: grep -q stops at once, and in the old
+  # `codelines | cut | grep -q` form the writer died of SIGPIPE (141) — the symbol read as undefined, the forbidden example as absent
+  local big="$TMP/big-resource.md" bi=0
+  { printf '# big\n\n```ts\nexport function makeThing(a: number) { return a }\n'
+    while [ $bi -lt 8000 ]; do printf 'export const filler_%05d = %d;\n' $bi $bi; bi=$((bi+1)); done
+    printf '```\n'; } > "$big"
+  if _has_def "$big" makeThing; then ok "a definition at the top of a 270 KB resource is found"
+  else bad "a definition at the top of a 270 KB resource reads as missing" "_has_def must not pipe codelines into grep -q (SIGPIPE 141 under pipefail)"; fi
+  if _code_has_fixed 'function makeThing(' "$big"; then ok "a forbidden example at the top of a 270 KB resource is found"
+  else bad "a forbidden example at the top of a 270 KB resource reads as absent" "the forbid proof check must not pipe codelines into grep -q"; fi
 
   # pack/seam boundary (v3.12.0) — pack assets are injected with --plugin-guides
   local PG="$fx/pg" A="$fx/clean/asm.json"

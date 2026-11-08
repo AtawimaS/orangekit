@@ -56,13 +56,13 @@ if [ -d "$ORANGEKIT_ROOT/dev/active" ]; then
     add "### In progress: ${NAME}"
     TF=$({ find "$d" -name '*task*' -type f 2>/dev/null || true; } | head -1)
     if [ -n "$TF" ] && [ -f "$TF" ]; then
-      DONE=$(orangekit_num "$(grep -c '^\s*- \[x\]' "$TF" 2>/dev/null || true)")
-      TODO=$(orangekit_num "$(grep -c '^\s*- \[ \]' "$TF" 2>/dev/null || true)")
+      DONE=$(orangekit_num "$(grep -c '^[[:space:]]*- \[x\]' "$TF" 2>/dev/null || true)")
+      TODO=$(orangekit_num "$(grep -c '^[[:space:]]*- \[ \]' "$TF" 2>/dev/null || true)")
       add "- progress ${DONE}/$((DONE+TODO))"
       if [ "$TODO" -gt 0 ]; then
         add "- remaining work:"
         # The last stage of a pipe runs in a subshell, so add() would only change a copy of OUT — process substitution keeps the loop in this shell
-        while IFS= read -r t; do add "$t"; done < <({ grep '^\s*- \[ \]' "$TF" 2>/dev/null || true; } | head -5 | sed 's/^\s*- \[ \]/  -/')
+        while IFS= read -r t; do add "$t"; done < <({ grep '^[[:space:]]*- \[ \]' "$TF" 2>/dev/null || true; } | head -5 | sed 's/^[[:space:]]*- \[ \]/  -/')
       fi
       add "- file: \`${TF#$ORANGEKIT_ROOT/}\`"
     fi

@@ -58,11 +58,21 @@ trap 'orangekit_on_err $LINENO' ERR
 # prefix strip or a `paths:` glob silently missed. Git Bash opens C:/… as is, so turning backslashes into slashes at the
 # boundary makes both sides meet without changing what the path opens. Only a drive-letter path, or any path on a
 # Windows shell, is rewritten: on macOS/Linux a backslash is a legal file-name character and stays.
+# A Git Bash path (/c/Users/…) is the same file as C:/Users/…, but once a value has passed through a native program (jq.exe,
+# python.exe) one side is /c/… and the other C:/…, and a prefix strip never matches — so on a Windows shell /x/… becomes X:/….
 orangekit_slashes() {  # $1 path → printed with / separators
-  local p="${1:-}"
+  local p="${1:-}" d
   case "$p" in
     [A-Za-z]:\\*|[A-Za-z]:/*) p=${p//\\//} ;;
-    *) case "${OSTYPE:-}" in msys*|cygwin*|win*) p=${p//\\//} ;; esac ;;
+    *) case "${OSTYPE:-}" in
+         msys*|cygwin*|win*)
+           p=${p//\\//}
+           case "$p" in
+             /[A-Za-z]|/[A-Za-z]/*)
+               d=""; command -v cygpath >/dev/null 2>&1 && d=$(cygpath -m "$p" 2>/dev/null || true)   # guarded: a failure inside $( ) trips the ERR trap
+               if [ -n "$d" ]; then p=$d; else d=$(printf '%s' "${p:1:1}" | tr '[:lower:]' '[:upper:]'); p="$d:/${p:3}"; fi ;;
+           esac ;;
+       esac ;;
   esac
   printf '%s' "$p"
 }

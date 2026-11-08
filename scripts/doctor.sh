@@ -1837,6 +1837,10 @@ run_self_test() {
     "PreToolUse-bash-force-push-main.json:force push to a shared branch:force push to a shared branch"
     "PreToolUse-bash-force-push-plus.json:+refspec force push (bypass attempt):force push to a shared branch"
     "PreToolUse-bash-force-push-upper.json:GIT push (case-insensitive filesystem runs it; the hook used to exit 1 and not block):force push to a shared branch"
+    # A command handed to a shell with -c runs as typed, but the gate read the target as `main"` and passed (exit 0)
+    "PreToolUse-bash-shc-force-push.json:bash -c payload (bypass attempt):force push to a shared branch"
+    "PreToolUse-bash-shc-single-quoted.json:sh -c single-quoted payload after cd (bypass attempt):force push to a shared branch"
+    "PreToolUse-bash-shc-zsh-lc-plus.json:/bin/zsh -lc +refspec payload (bypass attempt):force push to a shared branch"
     "PreToolUse-bash-push-delete-main.json:remote deletion of a shared branch:remote deletion of a shared branch"
     "PreToolUse-secret-github-pat.json:GitHub PAT:hardcoded GitHub Personal Access Token"
     "PreToolUse-secret-github-oauth.json:GitHub OAuth token:hardcoded GitHub token"
@@ -2607,6 +2611,15 @@ FXP
       _fx_static_case "$sfx" self-name-leak 'skills/sample/SKILL.md' 'OrangeKitClaudeCodeDevkit' \
         "repo name leak" 'printf -- "Example project: OrangeKitClaudeCodeDevkit\n" >> "$T/skills/sample/SKILL.md"'
     fi
+  fi
+
+  # ── hook edge cases (transcript · gate order · Windows paths) — cases a one-line JSON fixture cannot express ──
+  sec "hook edge cases (unparseable transcript · gate order · cost per target · Windows path · -c payload)"
+  local hec_out
+  if hec_out=$(bash "$ROOT/scripts/fixtures/hook-edge-cases.sh" "$ROOT" 2>&1); then
+    ok "hook edge cases: $(printf '%s\n' "$hec_out" | tail -1)"
+  else
+    bad "hook edge cases: $(printf '%s\n' "$hec_out" | tail -1)" "$(printf '%s\n' "$hec_out" | grep '^FAIL' | head -3 | cut -c1-160)"
   fi
 
   # ── orphan fixtures ────────────────────────────────────────────────

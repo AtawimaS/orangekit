@@ -71,7 +71,9 @@ _card_re() {   # $1 card → the ERE of its `paths:`. Empty string if there is n
        /^[[:space:]]*-[[:space:]]/ {sub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/["\047]/,""); print}' "$1" 2>/dev/null | _globs_ere
 }
 _session_reads() {   # $1 transcript → since the last compaction, "R<TAB>path<TAB>limit" · "B<TAB>command" · "S<TAB>skill"
-  jq -r 'if (.type=="system" and .subtype=="compact_boundary") then "C"
+  # Line by line with `fromjson?`: one line jq cannot parse (a lone surrogate `\ud83d` from an emoji cut in half, a truncated
+  # last line) made jq exit 5, and under pipefail + the ERR trap the hook died with it — a non-blocking exit (consumer report N1)
+  jq -rR 'fromjson? | if (.type=="system" and .subtype=="compact_boundary") then "C"
          elif .type=="assistant" then (.message.content[]? | select(.type=="tool_use")
            | if .name=="Read" then "R\t\(.input.file_path // "")\t\(.input.limit // "")"
              elif .name=="Bash" then "B\t\((.input.command // "") | gsub("\n";" "))"
@@ -86,7 +88,7 @@ _session_reads() {   # $1 transcript → since the last compaction, "R<TAB>path<
 _has_test_runner() {   # routing P4's "a repo that has a test runner"
   local r="$ORANGEKIT_ROOT" t
   if [ -f "$r/package.json" ] && command -v jq >/dev/null 2>&1; then
-    t=$(jq -r '.scripts.test // empty' "$r/package.json" 2>/dev/null)
+    t=$(jq -r '.scripts.test // empty' "$r/package.json" 2>/dev/null || true)   # an invalid package.json is "no runner", not a hook error
     [ -n "$t" ] && [[ "$t" != *"no test specified"* ]] && return 0
   fi
   for t in pytest.ini conftest.py go.mod Cargo.toml; do [ -f "$r/$t" ] && return 0; done
@@ -140,7 +142,7 @@ KG_NOTES=""
 _kg_note() { KG_NOTES+="${KG_NOTES:+$'\n\n'}$1"; }   # collect, do not print one JSON per target — hook stdout must be a single JSON object
 _kg_flush() { [ -z "$KG_NOTES" ] || orangekit_emit_context PreToolUse "$KG_NOTES"; KG_NOTES=""; }
 _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → exit 2 if it blocks
-  local rel="$1" isnew="$2" n re names=() kinds=() res=() unread=() again=() _k _v _l seen _ok _on _or
+  local rel="$1" isnew="$2" n re names=() kinds=() res=() unread=() again=() undec=() _k _v _l seen _ok _on _or
   while IFS="$(printf '\t')" read -r _ok _on _or; do
     [ -n "$_ok" ] || continue
     kinds+=("$_ok"); names+=("$_on"); res+=("$_or")
@@ -149,7 +151,8 @@ _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → 
   local tp sid state list
   tp=$(orangekit_field "$INPUT" '.transcript_path')
   sid=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
-  if [ -z "$tp" ] || [ ! -f "$tp" ] || ! command -v jq >/dev/null 2>&1; then
+  # Undecidable — no transcript · no jq · or the time budget is spent (an advisory gate must not run the hook into its 15 s timeout)
+  if [ -z "$tp" ] || [ ! -f "$tp" ] || ! command -v jq >/dev/null 2>&1 || [ "$SECONDS" -ge "$KG_DEADLINE" ]; then
     list=$(for i in "${!names[@]}"; do [ "${kinds[$i]}" = card ] && printf '  - Read .claude/rules/%s\n' "${names[$i]}" || printf '  - skill /%s\n' "${names[$i]}"; done)
     _kg_note "Load these before writing \`$rel\` (it cannot be determined whether they were loaded in this session, so this does not block):
 $list"
@@ -161,7 +164,14 @@ $list"
   state="$(orangekit_state_dir)/knowledge-gate.${sid:-nosession}"
   for i in "${!names[@]}"; do
     n=${names[$i]}; re=${res[$i]}; seen=0
+    # Whether a card or skill was loaded does not depend on the target — judge each once per hook call. Re-judging it per target
+    # walked every Read/Bash/Skill line once per card per target: 1,800 calls · 3 cards · 8 targets took 19 s (B7 residual)
+    case "$KG_SEEN" in
+      *"|${kinds[$i]}:$n=1|"*) continue ;;
+      *"|${kinds[$i]}:$n=0|"*) ;;
+      *)
     while IFS="$(printf '\t')" read -r _k _v _l; do
+      [ "$SECONDS" -lt "$KG_DEADLINE" ] || { seen=2; break; }   # budget spent mid-scan → undecidable for this item
       if [ "${kinds[$i]}" = skill ]; then
         [ "$_k" = S ] && { [ "$_v" = "$n" ] || [[ "$_v" == *:"$n" ]]; } && { seen=1; break; }
         continue
@@ -177,6 +187,9 @@ $list"
         B) [[ "$_v" =~ (^|[\;\&\|[:space:]])cat[[:space:]][^\;\&\|]*\.claude/rules/${n//./\\.} ]] && { seen=1; break; } ;;
       esac
     done <<< "$reads"
+    [ "$seen" -eq 2 ] || KG_SEEN="$KG_SEEN|${kinds[$i]}:$n=$seen|" ;;
+    esac
+    [ "$seen" -eq 2 ] && { undec+=("$i"); continue; }
     [ "$seen" -eq 1 ] && continue
     if [ -f "$state" ] && grep -qxF "${kinds[$i]}:$n" "$state"; then again+=("$i"); else unread+=("$i"); fi
   done
@@ -197,6 +210,11 @@ $list"
     _kg_note "You are writing \`$rel\` with rules or skills still not loaded — this was announced once in this session, so it does not block:
 $list"
   fi
+  if [ ${#undec[@]} -gt 0 ]; then
+    list=$(for i in "${undec[@]}"; do [ "${kinds[$i]}" = card ] && printf '  - Read .claude/rules/%s\n' "${names[$i]}" || printf '  - skill /%s\n' "${names[$i]}"; done)
+    _kg_note "Load these before writing \`$rel\` (it cannot be determined whether they were loaded in this session, so this does not block):
+$list"
+  fi
   return 0
 }
 if [ "${1:-}" = "--owning" ]; then
@@ -210,19 +228,30 @@ if [ "${1:-}" = "--owning" ]; then
   done
   exit 0
 fi
-if [ "$TOOL_NAME" = "Write" ] && [ -n "$FILE_PATH" ] && [ ! -e "$FILE_PATH" ]; then
-  _knowledge_gate "$(_gate_rel "$FILE_PATH" "$ORANGEKIT_ROOT")" 1
-  _kg_flush
-fi
-if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
-  _gcwd=$(orangekit_field "$INPUT" '.cwd'); _gcmd=$(orangekit_field "$INPUT" '.tool_input.command')
-  while IFS= read -r _gt; do
-    [ -n "$_gt" ] || continue
-    _gabs=$_gt; case "$_gabs" in /*) ;; *) _gabs="${_gcwd:-$ORANGEKIT_ROOT}/${_gabs#./}" ;; esac
-    if [ -e "$_gabs" ]; then _knowledge_gate "$(_gate_rel "$_gabs")" 0; else _knowledge_gate "$(_gate_rel "$_gabs")" 1; fi
-  done < <(_bash_targets "$_gcmd")
-  _kg_flush
-fi
+# **Runs last** (`_kg_done`), after the secret scan and the destructive gate. It is advisory and the slowest part of the hook
+# (a transcript pass), and it used to run first: a long transcript ran the hook into its 15 s timeout, or one unparseable
+# transcript line killed it, and a `DROP TABLE` or a hardcoded key in the same call was never judged (consumer report B7 · N1).
+# A blocking gate must never depend on an advisory one finishing.
+KG_SEEN="" KG_DEADLINE=$((SECONDS + $(orangekit_num "${ORANGEKIT_KG_BUDGET:-8}")))   # seconds of the 15 s hook timeout, counted from hook start; past it → undecidable notice
+_kg_run() {
+  if [ "$TOOL_NAME" = "Write" ] && [ -n "$FILE_PATH" ] && [ ! -e "$FILE_PATH" ]; then
+    _knowledge_gate "$(_gate_rel "$FILE_PATH" "$ORANGEKIT_ROOT")" 1
+    _kg_flush
+  fi
+  if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
+    local _gcwd _gcmd _gt _gabs
+    # cwd in the same form as ORANGEKIT_ROOT — on Windows it arrives as C:\… and a target under it never matched the root (S1)
+    _gcwd=$(orangekit_slashes "$(orangekit_field "$INPUT" '.cwd')"); _gcmd=$(orangekit_field "$INPUT" '.tool_input.command')
+    while IFS= read -r _gt; do
+      [ -n "$_gt" ] || continue
+      _gabs=$_gt; case "$_gabs" in /*|[A-Za-z]:/*) ;; *) _gabs="${_gcwd:-$ORANGEKIT_ROOT}/${_gabs#./}" ;; esac
+      if [ -e "$_gabs" ]; then _knowledge_gate "$(_gate_rel "$_gabs")" 0; else _knowledge_gate "$(_gate_rel "$_gabs")" 1; fi
+    done < <(_bash_targets "$_gcmd")
+    _kg_flush
+  fi
+  return 0
+}
+_kg_done() { _kg_run; exit 0; }   # every "nothing to block" exit below goes through here
 
 # ══════════════════════════════════════════════════════════════════════
 # Destructive command gate
@@ -599,7 +628,7 @@ _inline_listed_files() {
       f = hdr; sub(/^[^\/]*/, "", f); sub(/[ \t]*\)"?[ \t]*;$/, "", f)
       v = hdr; sub(/^for[ \t]+/, "", v); sub(/[ \t].*$/, "", v)
       ok = (f !~ /\.\./); n = 0; delete seen; words = ""
-      if (ok && (out s) ~ ("(>|tee[ \t]+(-a[ \t]+)?)[ \t]*" f "([^A-Za-z0-9_.\/-]|$)")) ok = 0
+      if (ok && (out s) ~ ("(>|tee[ \t]+(-a[ \t]+)?)[ \t]*" f "([^A-Za-z0-9_./-]|$)")) ok = 0
       while (ok && (r = (getline line < f)) > 0) {
         m = split(line, w, /[ \t\r\n]+/)   # RS is \001, so getline reads the whole file at once
         for (i = 1; i <= m; i++) {
@@ -1007,11 +1036,39 @@ _self_kill_patterns() (
       print pat
     } }'
 )
+# A command handed to a shell with -c runs exactly as if typed, but the gate saw it as one quoted argument:
+# `bash -c "git push --force origin main"` read the push target as `main"` and passed (exit 0), as did sh/zsh -c, -lc and
+# /bin/bash -c. Replace each `<shell> [-flags] -c '<payload>'` with its payload (\" \\ \$ \` unescaped in a double-quoted one),
+# up to 4 levels deep, so the segments below see the real commands. An unterminated quote is left as it was.
+_unwrap_shell_c() (   # $1 command → the same text with every shell -c payload inlined
+  trap - ERR; set +e
+  printf ' %s' "$1" | awk 'BEGIN { RS = "\001" } {
+    s = $0
+    for (pass = 0; pass < 4; pass++) {
+      out = ""; changed = 0
+      while (match(s, /[^A-Za-z0-9_.\/-]([A-Za-z0-9_.-]*\/)*(bash|sh|zsh|dash|ksh)([ \t]+-[A-Za-z]+)*[ \t]+-[A-Za-z]*c[A-Za-z]*[ \t]+["\047]/)) {
+        q = substr(s, RSTART + RLENGTH - 1, 1); pre = substr(s, 1, RSTART); rest = substr(s, RSTART + RLENGTH)
+        p = ""; i = 1; n = length(rest); closed = 0
+        while (i <= n) {
+          ch = substr(rest, i, 1)
+          if (q == "\"" && ch == "\\" && i < n && substr(rest, i + 1, 1) ~ /["\\$`]/) { p = p substr(rest, i + 1, 1); i += 2; continue }
+          if (ch == q) { closed = 1; break }
+          p = p ch; i++
+        }
+        if (!closed) { out = out substr(s, 1, RSTART + RLENGTH - 1); s = rest; continue }
+        out = out pre " " p " "; s = substr(rest, i + 1); changed = 1
+      }
+      s = out s
+      if (!changed) break
+    }
+    printf "%s", substr(s, 2)
+  }'
+)
 destructive_gate() {
   # Judged after stripping the heredoc body (= data). The secret check **does not strip** —
   # the axis is the opposite: writing a secret is itself the exposure, so the body is exactly what is judged.
   _record_db_creator_fns "$1"
-  local DCMD; DCMD=$(_expand_shell_literals "$(_inline_listed_files "$(_strip_heredoc_bodies "$1")")")
+  local DCMD; DCMD=$(_expand_shell_literals "$(_inline_listed_files "$(_unwrap_shell_c "$(_strip_heredoc_bodies "$1")")")")
   _GATE_CMD="$DCMD"
   local target="" _D
   dhas() { grep <<<"$_D" -Eqi -e "$1"; }
@@ -1221,16 +1278,16 @@ case "$TOOL_NAME" in
     destructive_gate "$CMD"
     # Self-reference avoidance applies **only to the secret scan**, and only to a **single command** that runs this hook or doctor —
     # both carry the pattern strings themselves in their body, so a self-check command gets blocked by itself.
-    _self_ref_cmd "$CMD" && exit 0
+    _self_ref_cmd "$CMD" && _kg_done
     # Looks **only at commands that write a file**. Scanning read commands too would falsely block
     # investigation and inspection commands (`grep 'AKIA[0-9A-Z]{16}' ...`), and a false positive makes the
     # user turn the hook off, and a hook that is off blocks nothing.
-    _writes_file "$CMD" || exit 0
+    _writes_file "$CMD" || _kg_done
     TEXT="$CMD"
     ;;
-  *) exit 0 ;;
+  *) _kg_done ;;
 esac
-[ -z "$TEXT" ] && exit 0
+[ -z "$TEXT" ] && _kg_done
 
 block() {
   printf '❌ Blocked: %s\n\n' "$1" >&2
@@ -1280,7 +1337,7 @@ case "$TOOL_NAME" in
       if ( cd "$(dirname -- "$FILE_PATH")" 2>/dev/null \
            && git check-ignore -q -- "$(basename -- "$FILE_PATH")" 2>/dev/null ); then
         printf '🔐 Writing a secret to %s — the file is ignored by .gitignore, so it will not be committed.\n' "$FILE_PATH" >&2
-        exit 0
+        _kg_done
       fi
       # Not ignored, or undecidable. No exemption: it falls through to the checks below, but a mark is left so that
       # block()'s guidance branches to "add it to .gitignore".
@@ -1371,4 +1428,4 @@ if [[ "$FILE_PATH" =~ \.env$ ]] || [[ "$FILE_PATH" =~ \.env\.(local|production)$
   warn ".env file modified: $FILE_PATH" "Check whether it is covered by .gitignore (.env.example is OK)"
 fi
 
-exit 0
+_kg_done
