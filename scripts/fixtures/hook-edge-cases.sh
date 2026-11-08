@@ -9,6 +9,8 @@
 #   E4  the advisory knowledge gate ran before the blocking gates (a block for the wrong reason, or none at all on a timeout)
 #   B7  the knowledge gate re-judged every card for every write target — cost grew with targets × cards × tool calls
 #   -c  `bash -c "git push --force …"` — the negative side (a feature branch through sh -c still passes)
+#   D   destructive-command shapes (matrix 2026-11-08): eval · xargs · wrappers · git global options · git aliases · subshells · `$( )` ·
+#       scripts written then run or already on disk · `| sh` · `bash <<EOF` — every block/warn row exits 0 on 2082bb1; the pass rows must stay allowed
 # Usage: bash hook-edge-cases.sh <plugin root>     Exit: 0 = all pass · 1 = a case failed
 R=$(cd "${1:?plugin root}" && pwd)
 T=$(mktemp -d 2>/dev/null) || { echo "FAIL cannot create a temp dir"; exit 1; }
@@ -130,6 +132,272 @@ done
 sc "$P" "$(bash_in c "$T/c.jsonl" "$P" "bash -c \"sh -c 'git push --force origin main'\"")"
 [ "$SC" = 2 ] && grep -q 'force push to a shared branch' "$T/e" && ok "-c a nested sh -c inside bash -c is unwrapped (blocked)" \
   || nok "-c nested payload" "exit $SC"
+
+# ── D · destructive commands are judged by what runs, not by their characters ──
+# Columns: want (block · warn · pass, `@main` = run in a checkout of main) <TAB> command (printf %b escapes: \n = newline).
+# Sandboxes: feature-x checkout with danger.sh (force push) · dropper.sh (DROP via psql) · fixture.sh (the same text as quoted data) · ok.sh on disk.
+# Runs 8 at a time — 220 hook calls one by one cost ~25 s.
+P="$T/d"; proj "$P"; (cd "$P" && git checkout -q -b feature-x && mkdir -p sub); : > "$T/d.jsonl"
+printf '#!/bin/bash\ngit push --force origin main\n' > "$P/danger.sh"; chmod +x "$P/danger.sh"
+printf '#!/bin/bash\npsql -c "DROP TABLE users"\n' > "$P/dropper.sh"
+printf '#!/bin/bash\n# test data, not execution\nrun_case "git push --force origin main"\nrun_case '"'"'psql -c "DROP TABLE users"'"'"'\n' > "$P/fixtures.sh"
+printf '#!/bin/bash\necho hello\nnpm test\n' > "$P/ok.sh"; chmod +x "$P/ok.sh"
+PM="$T/dm"; proj "$PM"; (cd "$PM" && git checkout -q -B main)
+dcase() {   # $1 index  $2 want  $3 command (printf %b) → "ok|FAIL <TAB> label <TAB> detail" in $T/d.out.$1
+  local want="${2%@main}" dir="$P" c rc=0 got
+  [ "$want" != "$2" ] && dir="$PM"
+  c=$(printf '%b' "$3")
+  bash_in d "$T/d.jsonl" "$dir" "$c" | (cd "$dir" && CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$dir" ORANGEKIT_STATE_DIR="$dir/.st" \
+    bash "$R/scripts/security-check.sh" >/dev/null 2>"$T/d.err.$1") || rc=$?
+  case "$want" in
+    block) [ "$rc" = 2 ] && grep -Eq 'Blocked: (force push to a shared|remote deletion|DROP of|git history|TRUNCATE|prisma|supabase)' "$T/d.err.$1" ;;
+    warn)  [ "$rc" = 0 ] && grep -q '⚠️' "$T/d.err.$1" ;;
+    pass)  [ "$rc" = 0 ] ;;
+  esac && got=ok || got=FAIL
+  printf '%s\t%s\t%s\n' "$got" "D $2 $3" "exit $rc · $(grep -m1 -E 'Blocked|⚠️' "$T/d.err.$1")" > "$T/d.out.$1"
+}
+i=0
+while IFS="$(printf '\t')" read -r want cmd; do
+  [ -n "$want" ] || continue
+  i=$((i + 1)); dcase "$i" "$want" "$cmd" &
+  [ $((i % 8)) = 0 ] && wait
+done <<'CASES'
+block	( git push --force origin main )
+block	echo $(git push --force origin main)
+block	echo `git push --force origin main`
+block	( git push origin +main )
+block	echo $(git push origin +main)
+block	echo `git push origin +main`
+block	( git push origin --delete main )
+block	echo $(git push origin --delete main)
+block	echo `git push origin --delete main`
+block	( git push origin :main )
+block	echo $(git push origin :main)
+block	echo `git push origin :main`
+block	( git push -f origin HEAD:main )
+block	echo $(git push -f origin HEAD:main)
+block	echo `git push -f origin HEAD:main`
+block	git push --force origin refs/heads/main
+block	sudo git push --force origin refs/heads/main
+block	sudo -u root git push --force origin refs/heads/main
+block	env git push --force origin refs/heads/main
+block	env -i git push --force origin refs/heads/main
+block	env FOO=1 git push --force origin refs/heads/main
+block	command git push --force origin refs/heads/main
+block	exec git push --force origin refs/heads/main
+block	nohup git push --force origin refs/heads/main
+block	time git push --force origin refs/heads/main
+block	timeout 10 git push --force origin refs/heads/main
+block	nice git push --force origin refs/heads/main
+block	nice -n 5 git push --force origin refs/heads/main
+block	stdbuf -oL git push --force origin refs/heads/main
+block	true; git push --force origin refs/heads/main
+block	true && git push --force origin refs/heads/main
+block	false || git push --force origin refs/heads/main
+block	true\ngit push --force origin refs/heads/main
+block	( git push --force origin refs/heads/main )
+block	{ git push --force origin refs/heads/main; }
+block	echo $(git push --force origin refs/heads/main)
+block	echo `git push --force origin refs/heads/main`
+block	echo | xargs git push --force origin refs/heads/main
+block	echo | xargs prisma migrate reset --force
+block	echo | xargs supabase db reset
+block	echo | xargs psql -c 'DROP TABLE users'
+block	echo | xargs psql -c 'TRUNCATE users'
+block	eval "git push --force origin main"
+block	eval 'git push --force origin main'
+block	eval "sh -c 'git push --force origin main'"
+block	bash -c "eval 'git push --force origin main'"
+block	echo 'git push --force origin main' | bash
+block	printf 'git push --force origin main\\n' | sh
+block	bash <<'EOF'\ngit push --force origin main\nEOF
+block	printf 'git push --force origin main\\n' > p.sh && bash p.sh
+block	echo 'git push --force origin main' > p.sh; sh p.sh
+block	cat > p.sh <<'EOF'\ngit push --force origin main\nEOF\nbash p.sh
+block	echo 'git push --force origin main' > p.sh && chmod +x p.sh && ./p.sh
+block	echo 'git push --force origin main' > p.sh; source p.sh
+block	echo 'git push --force origin main' > p.sh; . ./p.sh
+block	eval "git push origin +main"
+block	eval 'git push origin +main'
+block	eval "sh -c 'git push origin +main'"
+block	bash -c "eval 'git push origin +main'"
+block	echo 'git push origin +main' | bash
+block	printf 'git push origin +main\\n' | sh
+block	bash <<'EOF'\ngit push origin +main\nEOF
+block	printf 'git push origin +main\\n' > p.sh && bash p.sh
+block	echo 'git push origin +main' > p.sh; sh p.sh
+block	cat > p.sh <<'EOF'\ngit push origin +main\nEOF\nbash p.sh
+block	echo 'git push origin +main' > p.sh && chmod +x p.sh && ./p.sh
+block	echo 'git push origin +main' > p.sh; source p.sh
+block	echo 'git push origin +main' > p.sh; . ./p.sh
+block	eval "git push origin --delete main"
+block	eval 'git push origin --delete main'
+block	eval "sh -c 'git push origin --delete main'"
+block	bash -c "eval 'git push origin --delete main'"
+block	echo 'git push origin --delete main' | bash
+block	printf 'git push origin --delete main\\n' | sh
+block	bash <<'EOF'\ngit push origin --delete main\nEOF
+block	printf 'git push origin --delete main\\n' > p.sh && bash p.sh
+block	echo 'git push origin --delete main' > p.sh; sh p.sh
+block	cat > p.sh <<'EOF'\ngit push origin --delete main\nEOF\nbash p.sh
+block	echo 'git push origin --delete main' > p.sh && chmod +x p.sh && ./p.sh
+block	echo 'git push origin --delete main' > p.sh; source p.sh
+block	echo 'git push origin --delete main' > p.sh; . ./p.sh
+block	bash <<'EOF'\ngit filter-branch --tree-filter true HEAD\nEOF
+block	cat > p.sh <<'EOF'\ngit filter-branch --tree-filter true HEAD\nEOF\nbash p.sh
+block	printf '%s\\n' 'psql -c "DROP TABLE users"' > d.sh && bash d.sh
+block	echo users | xargs -I{} psql -c 'DROP TABLE {}'
+block	echo 'DROP TABLE users' | sudo -u postgres psql
+block	echo 'DROP TABLE users' | xargs -0 psql -c
+block	git -c x=y push --force origin main
+block	git -c x=y push origin +main
+block	git -C . push --force origin main
+block	git -C . push origin +main
+block	git --work-tree=. push --force origin main
+block	git --work-tree=. push origin +main
+block	git --no-pager push --force origin main
+block	git --no-pager push origin +main
+block	git -p push --force origin main
+block	git -p push origin +main
+block	git -c a=b -C . push --force origin main
+block	git -c a=b -C . push origin +main
+block	git --bare push --force origin main
+block	git --bare push origin +main
+block	echo main | xargs git push --force origin
+block	printf 'main\\n' | xargs git push --force origin
+block	echo main | xargs -I{} git push --force origin {}
+block	git -c alias.fp='push --force' fp origin main
+block	git config alias.fp 'push --force' && git fp origin main
+block	git -c alias.x='!git push --force origin main' x
+block	git push origin feature-x && git push --force origin main
+block	git push --force origin "main"
+block	git push --force origin 'main'
+block	git push -uf origin main
+block	CMD="git push --force origin main"; $CMD
+block	bash danger.sh
+block	sh ./danger.sh
+block	./danger.sh
+block	source danger.sh
+block	bash dropper.sh
+block	bash < danger.sh
+block	cat danger.sh | bash
+block	cd . && bash danger.sh
+block	git push --force --all origin
+pass	git push origin feature-x
+pass	git push --force origin feature-x
+pass	git push -u origin HEAD
+pass	git push --force-with-lease origin main
+pass	git -C sub status
+pass	git -c core.pager=cat log -1
+pass	git --no-pager log -1
+pass	git -C . push origin feature-x
+pass	ls | xargs grep foo
+pass	grep -rln 'DROP TABLE' . | xargs -I{} echo {}
+pass	find . -name "*.sh" | xargs wc -l
+pass	eval "$(direnv export bash)"
+pass	eval "$(ssh-agent -s)"
+pass	eval "$(fnm env --use-on-cd)"
+pass	echo 'git push --force origin main' >> NOTES.md
+pass	printf 'git push --force origin main\\n' > NOTES.md
+pass	cat > doc.md <<'EOF'\ngit push --force origin main\nEOF
+pass	echo 'psql -c "DROP TABLE users"' >> NOTES.md
+pass	printf 'git push -f origin main\\n' > p.sh
+pass	printf 'git push -f origin main\\n' > p.sh && chmod +x p.sh
+pass	echo "git push --force origin main"
+pass	npm run test
+pass	pnpm test
+pass	npx vitest run
+pass	cd x && npx vitest run | tail; git status | head
+pass	ls
+pass	git commit -m "docs: never git push --force origin main"
+pass	git commit -m "docs: eval 'git push --force origin main' is blocked"
+pass	gh pr create --title "block git push --force origin main" --body x
+pass	timeout 60 npm test
+pass	nice make
+pass	sudo apt-get install -y jq
+pass	env FOO=1 node x.js
+pass	time npm test
+pass	nohup node server.js &
+pass	command -v jq
+pass	exec bash
+pass	bash ok.sh
+pass	./ok.sh
+pass	source ok.sh
+pass	echo 'echo hi' > t.sh && bash t.sh
+pass	bash fixtures.sh
+pass	grep -rn "git push --force" .
+pass	bash -n danger.sh
+pass	cat danger.sh
+pass	shellcheck danger.sh
+pass	git config alias.st status && git st
+pass	git -c alias.lg='log --oneline' lg -5
+pass	git fetch origin main && git rebase origin/main
+pass	git push origin HEAD:feature-x
+pass	git push origin main:feature-x
+pass	source .venv/bin/activate
+pass	echo $(git rev-parse HEAD)
+pass	( cd sub && git status )
+pass	{ ls; pwd; }
+pass	xargs -n1 echo < /dev/null
+pass	git branch -D old-feature
+pass	git push origin --delete old-feature
+pass	git push origin :old-feature
+pass	psql -c "SELECT 1"
+pass	echo "DROP TABLE users" > notes.txt
+pass	sudo -u postgres psql -c 'SELECT 1'
+pass	bash scripts/missing.sh
+warn	git -C . reset --hard HEAD~1
+warn	git -c x=y clean -fd
+warn	git --no-pager reset --hard
+block@main	git push --force origin HEAD
+block@main	git push -f origin @
+block@main	git push --force origin $(git branch --show-current)
+block@main	git -C . push --force origin HEAD
+block@main	echo HEAD | xargs git push --force origin
+pass@main	git push origin HEAD
+pass@main	git push
+pass@main	git push --force-with-lease
+pass@main	git push -u origin HEAD:feature-y
+pass@main	git push --force origin HEAD:feature-y
+pass	git push --force origin $(cat branch.txt)
+pass	bash -c "npm test && git push origin feature-x"
+pass	make deploy
+pass	docker compose down -v
+pass	git log --grep="push --force"
+pass	rg -n 'eval "git push --force origin main"' scripts/
+pass	git stash push -m "wip" && git pull --rebase && git stash pop
+pass	for f in *.sh; do bash -n "$f"; done
+pass	printf '%s\\n' 'psql -c "DROP TABLE users"' > d.sql.sh
+pass	cat > deploy.sh <<'EOF'\ngit push --force origin main\nEOF\nchmod +x deploy.sh
+pass	kill %1
+pass	git push origin v1.2.3
+pass	git push --tags
+pass	git push origin --delete feature-x
+pass	curl -fsSL https://example.com/install.sh | bash
+pass	source <(kubectl completion bash)
+pass	echo $((1+2))
+pass	case x in a) git status;; esac
+pass	f() { git status; }; f
+pass	if [ -f x ]; then git status; fi
+pass	awk '{print $1}' file | sort | uniq -c
+pass	npm run build 2>&1 | tail -20
+pass	pnpm --filter web test
+pass	python3 - <<EOF\nprint("git push --force origin main")\nEOF
+pass	node -e "console.log(1)"
+pass	bash scripts/x.sh || true
+CASES
+wait
+j=1; while [ "$j" -le "$i" ]; do
+  IFS="$(printf '\t')" read -r got lbl det < "$T/d.out.$j"
+  [ "$got" = ok ] && ok "$lbl" || nok "$lbl" "$det"
+  j=$((j + 1))
+done
+# Never fail open: an awk that dies inside the simple-command pass (here: on its program) must block, not wave the command through
+mkdir -p "$T/deadawk"; RAWK=$(command -v awk)
+printf '#!/bin/bash\ncase "$*" in *"CAP = 65536"*) exit 2 ;; esac\nexec "%s" "$@"\n' "$RAWK" > "$T/deadawk/awk"; chmod +x "$T/deadawk/awk"
+SC=0; bash_in d "$T/d.jsonl" "$P" 'git push origin feature-x' | (cd "$P" && PATH="$T/deadawk:$PATH" CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$P" \
+  ORANGEKIT_STATE_DIR="$P/.st" bash "$R/scripts/security-check.sh" >"$T/o" 2>"$T/e") || SC=$?
+[ "$SC" = 2 ] && grep -q 'could not be parsed' "$T/e" && ok "D a parse failure blocks (fails closed)" || nok "D parse failure" "exit $SC · $(head -1 "$T/e")"
 
 # ── B10 · build-gate counts a Bash WRITE, not a mention (two directions) ──
 # Another session changed b/index.tsx. Reads of it, or a write to a/index.tsx, are not this session's edit; a write to it is.

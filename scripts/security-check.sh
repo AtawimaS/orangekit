@@ -1064,12 +1064,300 @@ _unwrap_shell_c() (   # $1 command → the same text with every shell -c payload
     printf "%s", substr(s, 2)
   }'
 )
+# A command is judged by **what runs**, not by its characters. The checks below used to read the text, and every shell shape that moves
+# a word out of command position — or a command into a place the text does not show — went through (measured 2026-11-08, 121 of 419 matrix
+# cases on 1.14.1, the same on upstream): `eval "git push --force origin main"`, `echo main | xargs git push --force origin`, `git -c x=y push …`,
+# `git -C . push …`, `( git push … )`, `"main"` in quotes, `refs/heads/main`, a second push after a feature-branch push, a git alias, and a script
+# written then run (`printf … > p.sh && bash p.sh`, `bash <<EOF`, `| sh`) or already on disk (`bash danger.sh`).
+# One quote-aware pass turns the command into its **simple commands**, one per line: `mark<US>cmd<US>arg…` (US = \037, quotes removed,
+# the command word lowercased to its basename). On the way it
+#   · drops leading assignments and keywords, and the wrappers sudo · doas · env · command · exec · nohup · setsid · time · nice · ionice · timeout · stdbuf · npx · bunx
+#   · re-parses what a shell would run again: eval's words, a `<shell> -c` payload, `$( )` · backticks · `<( )`, `$VAR` as the command when VAR holds
+#     a literal from the same command, `xargs CMD` with the words a literal `echo`/`printf`/`cat FILE` feeds it, and a git alias (`-c alias.x=…` ·
+#     `git config alias.x …` in the same command — a `!` alias is a shell command)
+#   · strips git's global options before the subcommand (`-c k=v` · `-C dir` · `--git-dir` · `--work-tree` · `--no-pager` · `-p` · `--bare` …)
+#   · reads the body of a script that runs — `bash|sh|zsh|dash|ksh FILE` · `source|. FILE` · `./FILE` · `bash < FILE` · `cat FILE | bash` · `| bash`
+#     · `bash <<EOF` — from what the same command wrote to it (`echo|printf … > F` · `cat > F <<EOF` · `tee F`), else from disk (64 KB cap, a path
+#     run directly only with a shell shebang or a .sh name). It is parsed the same way, so only its command-position lines count: a test script
+#     that carries `"git push --force origin main"` as a quoted argument is data, not a push
+# mark 1 = it came through a path the text checks cannot see (a wrapper, xargs, a script body, a shell's stdin); the SQL checks take only those lines.
+# Undecidable, left as today (comment, not guess): a value computed at run time (`$CMD` from `$(…)` · `read`), a script fetched at run time (`curl … | sh`),
+# a script over the cap, a non-shell interpreter (`python x.py`), an npm/pnpm script body, an alias set in an earlier command and stored in git config.
+# A final `@@ok` line proves the pass finished — the caller fails closed without it.
+_simple_cmds() (   # $1 command  $2 directory relative script paths resolve against
+  trap - ERR; set +e
+  printf '%s' "$1" | awk -v cwd="${2:-$PWD}" -v home="${HOME:-}" 'BEGIN { RS = "\001"; CAP = 65536; BUDGET = 262144; US = "\037"; CWD = cwd }
+    function base(w) { sub(/.*\//, "", w); w = tolower(w); sub(/\.exe$/, "", w); return w }
+    function qj(dep, a, b,   s, i, w) { s = ""; for (i = a; i <= b; i++) { w = W[dep, i]; gsub(/\047/, "\047\\\047\047", w); s = s " \047" w "\047" } return s }
+    function pj(dep, a, b,   s, i) { s = ""; for (i = a; i <= b; i++) s = s (i > a ? " " : "") W[dep, i]; return s }
+    function norm(p) {
+      if (p == "") return ""
+      if (substr(p, 1, 2) == "~/") p = home substr(p, 2)
+      if (p !~ /^\// && p !~ /^[A-Za-z]:\//) p = CWD "/" p
+      while (sub(/\/\.\//, "/", p)) ; sub(/\/\.$/, "", p)
+      return p
+    }
+    function unesc(t) { gsub(/\\n/, "\n", t); gsub(/\\t/, "\t", t); return t }
+    function disk(p, direct,   c, r, q, ok) {   # p normalised → content, "" when not a regular file · over the cap · (run directly) not a shell script
+      # One sh call answers what awk cannot: getline on a directory is a fatal i/o error in BSD awk, and the size must be known before reading
+      q = p; gsub(/\047/, "\047\\\047\047", q); q = "\047" q "\047"; ok = ""
+      c = "f=" q "; [ -f \"$f\" ] && [ -r \"$f\" ] && [ \"$(wc -c < \"$f\")\" -le " CAP " ] && " \
+          (direct ? "{ case \"$f\" in *.sh|*.bash|*.zsh|*.ksh) ;; *) head -n 1 \"$f\" | grep -Eq \"^#!.*[/ ]((ba|z|da|k)?sh)([[:space:]]|$)\" ;; esac; } && " : "") "echo y"
+      c | getline ok; close(c)
+      if (ok !~ /^y/) return ""   # RS is \001, so the line keeps its newline
+      c = ""; r = (getline c < p); close(p)
+      if (r < 0 || BUDGET < length(c)) return ""
+      BUDGET -= length(c); return c
+    }
+    function resolve(p, direct,   k) {   # a script path → its content: what this command wrote there, else the file
+      if (p == "" || p ~ /[$`*?]/) return ""
+      k = norm(p)
+      if (k in WR) return WR[k]
+      return disk(k, direct)
+    }
+    function stdin_text(t) { return (substr(t, 1, 1) == "\001") ? resolve(substr(t, 2), 0) : t }
+    function write_to(f, app, text,   k) { if (f == "" || f ~ /[$`]/ || f ~ /^\/dev\//) return; k = norm(f); WR[k] = (app ? ((k in WR) ? WR[k] : disk(k, 0)) : "") text }
+    function emit(mark, name, dep, a, b, extra,   s, i, w) {
+      s = mark US name
+      for (i = a; i <= b; i++) { w = W[dep, i]; gsub(/[\n\r]/, " ", w); s = s US w }
+      if (extra != "") { gsub(/[\n\r]/, " ", extra); s = s US extra }
+      print s
+    }
+    function addword(dep, w,   r) {
+      r = RED[dep]; RED[dep] = ""
+      if (r == "") { W[dep, ++N[dep]] = w; return }
+      if (r == ">" || r == ">>") { OUTF[dep] = w; OUTA[dep] = (r == ">>"); return }
+      if (r == "<") { INF[dep] = w; return }
+      if (r == "<<<") { HS[dep] = w; return }
+      if (r == "<<" || r == "<<-") { HDN[dep]++; HDD[dep, HDN[dep]] = w; HDT[dep, HDN[dep]] = (r == "<<-"); HDK[dep, HDN[dep]] = "?"; return }
+    }
+    function closepar(s, i,   L, c, q, d) {   # i = first char after "(" → index of the matching ")"
+      L = length(s); q = ""; d = 1
+      for (; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (q != "") { if (c == "\\" && q == "\"") i++; else if (c == q) q = ""; continue }
+        if (c == "\\") { i++; continue }
+        if (c == "\047" || c == "\"") q = c
+        else if (c == "(") d++
+        else if (c == ")") { if (--d == 0) return i }
+      }
+      return L + 1
+    }
+    function closetick(s, i,   L, c) { L = length(s); for (; i <= L; i++) { c = substr(s, i, 1); if (c == "\\") i++; else if (c == "`") return i } return L + 1 }
+    function heredocs(s, i, dep,   L, k, body, ln, c, cmp) {
+      L = length(s)
+      for (k = 1; k <= HDN[dep]; k++) {
+        body = ""
+        while (i <= L) {
+          ln = ""; while (i <= L && (c = substr(s, i, 1)) != "\n") { ln = ln c; i++ } i++
+          cmp = ln; if (HDT[dep, k]) sub(/^\t+/, "", cmp)
+          if (cmp == HDD[dep, k]) break
+          body = body ln "\n"
+        }
+        if (HDK[dep, k] == "shell") parse(body, 1, dep + 1)
+        else if (HDK[dep, k] == "write") write_to(HDF[dep, k], HDA[dep, k], body)
+        else if (HDK[dep, k] == "db") { gsub(/[\n\r]/, " ", body); print HDL[dep, k] US body }
+      }
+      HDN[dep] = 0
+      return i
+    }
+    function parse(s, mark, dep,   i, L, c, d, q, cur, inw, e, body, sep) {
+      if (dep > 8) return
+      L = length(s); i = 1; q = ""; cur = ""; inw = 0
+      N[dep] = 0; RED[dep] = ""; OUTF[dep] = ""; OUTA[dep] = 0; INF[dep] = ""; HS[dep] = ""; HDN[dep] = 0; PIPEIN[dep] = ""
+      while (i <= L) {
+        c = substr(s, i, 1)
+        if (q == "\047") { if (c == q) q = ""; else cur = cur c; i++; continue }
+        if (q == "\"") {
+          if (c == "\\" && i < L) { d = substr(s, i + 1, 1); if (d ~ /["\\$`]/) { cur = cur d; i += 2; continue } if (d == "\n") { i += 2; continue } }
+          else if (c == "\"") { q = ""; i++; continue }
+          else if (c == "$" && substr(s, i + 1, 1) == "(") { e = closepar(s, i + 2); body = substr(s, i + 2, e - i - 2); parse(body, mark, dep + 1); cur = cur "$(" body ")"; i = e + 1; continue }
+          else if (c == "`") { e = closetick(s, i + 1); body = substr(s, i + 1, e - i - 1); parse(body, mark, dep + 1); cur = cur "`" body "`"; i = e + 1; continue }
+          cur = cur c; i++; continue
+        }
+        if (c == "\\") { d = substr(s, i + 1, 1); if (d != "\n" && d != "") { cur = cur d; inw = 1 } i += 2; continue }
+        if (c == "\047" || c == "\"") { q = c; inw = 1; i++; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "\047"; inw = 1; i += 2; continue }
+        if ((c == "$" || c == "<" || c == ">") && substr(s, i + 1, 1) == "(") {
+          e = closepar(s, i + 2); body = substr(s, i + 2, e - i - 2); parse(body, mark, dep + 1); cur = cur c "(" body ")"; inw = 1; i = e + 1; continue
+        }
+        if (c == "`") { e = closetick(s, i + 1); body = substr(s, i + 1, e - i - 1); parse(body, mark, dep + 1); cur = cur "`" body "`"; inw = 1; i = e + 1; continue }
+        if (c == " " || c == "\t" || c == "\r") { if (inw) { addword(dep, cur); cur = ""; inw = 0 } i++; continue }
+        if (c == "#" && !inw) { while (i <= L && substr(s, i, 1) != "\n") i++; continue }
+        if (c == ">" || c == "<" || (c == "&" && substr(s, i + 1, 1) == ">")) {
+          if (inw && cur ~ /^[0-9]+$/) { cur = ""; inw = 0 } else if (inw) { addword(dep, cur); cur = ""; inw = 0 }
+          if (c == "&") { i++; c = ">" }
+          if (substr(s, i, 3) == "<<<") { RED[dep] = "<<<"; i += 3; continue }
+          if (substr(s, i, 2) == "<<") { RED[dep] = "<<"; i += 2; if (substr(s, i, 1) == "-") { RED[dep] = "<<-"; i++ } continue }
+          RED[dep] = c; i++
+          if (c == ">" && substr(s, i, 1) == ">") { RED[dep] = ">>"; i++ }
+          if (substr(s, i, 1) == "|") i++
+          if (substr(s, i, 1) == "&") { RED[dep] = "dup"; i++ }
+          continue
+        }
+        if (c == ";" || c == "&" || c == "|" || c == "\n" || c == "(" || c == ")") {
+          if (inw) { addword(dep, cur); cur = ""; inw = 0 }
+          sep = c
+          if (c == "|" && substr(s, i + 1, 1) == "|") { sep = "||"; i++ }
+          else if (c == "|" && substr(s, i + 1, 1) == "&") i++
+          else if (c == "&" && substr(s, i + 1, 1) == "&") { sep = "&&"; i++ }
+          else if (c == ";" && substr(s, i + 1, 1) == ";") i++
+          endcmd(mark, dep, sep); i++
+          if (c == "\n" && HDN[dep] > 0) i = heredocs(s, i, dep)
+          continue
+        }
+        cur = cur c; inw = 1; i++
+      }
+      if (inw) addword(dep, cur)
+      endcmd(mark, dep, "")
+      if (HDN[dep] > 0) heredocs("", 1, dep)
+    }
+    function endcmd(mark, dep, sep,   n, k, j, b, w, stdin, wrapped, nm, v, R, items, ni, it, t, content, x, sk) {
+      n = N[dep]; stdin = PIPEIN[dep]; PIPEIN[dep] = ""; wrapped = 0; k = 1
+      if (HS[dep] != "") stdin = HS[dep]
+      if (INF[dep] != "") stdin = "\001" INF[dep]
+      # leading assignments — a literal one is remembered for `$VAR` as a command word
+      while (k <= n && W[dep, k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        nm = W[dep, k]; v = nm; sub(/=.*/, "", nm); sub(/^[^=]*=/, "", v)
+        if (v !~ /[$`]/) VAR[nm] = v; else delete VAR[nm]
+        k++
+      }
+      while (k <= n && W[dep, k] ~ /^(if|then|else|elif|do|while|until|!|\{|\}|fi|done|esac)$/) k++
+      if (k <= n && W[dep, k] ~ /^(for|case|select|function|in)$/) k = n + 1
+      for (;;) {   # wrappers — the command they run is the next word after their own options
+        if (k > n) break
+        b = base(W[dep, k])
+        if (b == "sudo" || b == "doas") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] == "--") { k++; break } if (W[dep, k] ~ /^(-[ugCDhprtUT]|--(user|group|chdir|host|prompt|role|type|other-user|close-from))$/) k++; k++ } while (k <= n && W[dep, k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) k++ }
+        else if (b == "env") {
+          k++
+          while (k <= n && (W[dep, k] ~ /^-/ || W[dep, k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
+            if (W[dep, k] ~ /^(-S|--split-string)$/) { parse(W[dep, k + 1] qj(dep, k + 2, n), 1, dep + 1); k = n + 1; break }
+            if (W[dep, k] == "--") { k++; break }
+            if (W[dep, k] ~ /^(-u|-C|--unset|--chdir)$/) k++
+            k++
+          }
+        }
+        else if (b == "command") { k++; if (W[dep, k] ~ /^-[vV]/) k = n + 1; else if (W[dep, k] == "-p") k++ }
+        else if (b == "exec") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] == "-a") k++; k++ } }
+        else if (b ~ /^(nohup|setsid|time|chronic|unbuffer|caffeinate)$/) { k++; while (k <= n && W[dep, k] ~ /^-/) k++ }
+        else if (b == "nice" || b == "ionice") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] ~ /^(-[ncpt]|--adjustment|--class|--classdata)$/) k++; k++ } }
+        else if (b == "timeout") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] ~ /^(-[sk]|--signal|--kill-after)$/) k++; k++ } k++ }
+        else if (b == "stdbuf") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] ~ /^-[ioe]$/ || W[dep, k] ~ /^--(input|output|error)$/) k++; k++ } }
+        else if (b == "npx" || b == "bunx") { k++; while (k <= n && W[dep, k] ~ /^-/) { if (W[dep, k] ~ /^(-p|--package)$/) k++; k++ } }
+        else if ((b == "pnpm" || b == "yarn") && W[dep, k + 1] ~ /^(exec|dlx)$/) k += 2
+        else break
+        wrapped = 1
+      }
+      if (k <= n) {
+        b = base(W[dep, k]); mark = (mark || wrapped) ? 1 : 0
+        if (W[dep, k] ~ /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/) {   # `$CMD` — re-parsed when CMD holds a literal set in this command
+          nm = W[dep, k]; gsub(/[${}]/, "", nm)
+          if (nm in VAR) parse(VAR[nm] qj(dep, k + 1, n), 1, dep + 1)
+        }
+        else if (b == "eval") parse(pj(dep, k + 1, n), mark, dep + 1)
+        else if (b ~ /^(ba|z|da|k)?sh$/) {
+          j = k + 1; sk = 0
+          while (j <= n && W[dep, j] ~ /^[-+]/) {
+            if (W[dep, j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { parse(W[dep, j + 1], mark, dep + 1); sk = 1; break }
+            if (W[dep, j] ~ /^-[A-Za-z]*n/) { sk = 1; break }
+            if (W[dep, j] ~ /^([-+]o|--rcfile|--init-file)$/) j++
+            j++
+          }
+          if (!sk) {
+            if (j <= n) parse(resolve(W[dep, j], 0), 1, dep + 1)
+            else if (HDN[dep] > 0 && HDK[dep, HDN[dep]] == "?") HDK[dep, HDN[dep]] = "shell"
+            else if (stdin != "") parse(stdin_text(stdin), 1, dep + 1)
+          }
+        }
+        else if (b == "source" || b == ".") { if (k < n) parse(resolve(W[dep, k + 1], 0), 1, dep + 1) }
+        else if (b == "xargs") {
+          j = k + 1; R = ""
+          while (j <= n && W[dep, j] ~ /^-/) {
+            w = W[dep, j]
+            if (w == "--") { j++; break }
+            if (w == "-I") { R = W[dep, j + 1]; j += 2; continue }
+            if (w ~ /^-I./) { R = substr(w, 3); j++; continue }
+            if (w ~ /^-i/) { R = (length(w) > 2) ? substr(w, 3) : "{}"; j++; continue }
+            if (w ~ /^-[nLPsdEa]$/ || w ~ /^--(max-args|max-lines|max-procs|max-chars|delimiter|eof|arg-file|process-slot-var)$/) j++
+            j++
+          }
+          content = (stdin == "") ? "" : stdin_text(stdin)
+          ni = split(content, items, /[ \t\r\n]+/); t = ""; it = ""
+          for (x = 1; x <= ni; x++) if (items[x] != "") { if (it == "") it = items[x]; t = t " " items[x] }
+          if (j > n) { W[dep, j] = "echo"; n = j }
+          if (R != "") { for (x = j; x <= n; x++) if (it != "") gsub(R == "{}" ? "\\{\\}" : R, it, W[dep, x]); parse(qj(dep, j, n), 1, dep + 1) }
+          else parse(qj(dep, j, n) t, 1, dep + 1)
+        }
+        else if (b == "git") {
+          j = k + 1
+          while (j <= n && W[dep, j] ~ /^-/) {
+            w = W[dep, j]
+            if (w == "-c") { v = W[dep, j + 1]; if (v ~ /^alias\.[^=]+=/) { nm = v; sub(/^alias\./, "", nm); sub(/=.*/, "", nm); sub(/^[^=]*=/, "", v); AL[nm] = v } j += 2; continue }
+            if (w ~ /^(-C|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--list-cmds)$/) j++
+            j++
+          }
+          w = W[dep, j]
+          if (w == "config") for (x = j + 1; x < n; x++) if (W[dep, x] ~ /^alias\./) { nm = W[dep, x]; sub(/^alias\./, "", nm); AL[nm] = W[dep, x + 1]; break }
+          if (w in AL && ALD < 8) {
+            ALD++; v = AL[w]
+            if (substr(v, 1, 1) == "!") parse(substr(v, 2) qj(dep, j + 1, n), mark, dep + 1)
+            else parse("git " v qj(dep, j + 1, n), mark, dep + 1)
+            ALD--
+          } else emit(mark, "git", dep, j, n, "")
+        }
+        else {
+          if (b == "cd" || b == "pushd") { if (k < n && W[dep, k + 1] !~ /[$`]/ && W[dep, k + 1] != "-") CWD = norm(W[dep, k + 1]) }
+          content = ""
+          if (b == "echo") { j = k + 1; while (j <= n && W[dep, j] ~ /^-[neE]+$/) j++; content = unesc(pj(dep, j, n)) "\n" }
+          else if (b == "printf" && W[dep, k + 1] != "-v") { content = unesc(W[dep, k + 1]); for (x = k + 2; x <= n; x++) content = content "\n" W[dep, x]; content = content "\n" }
+          if ((b == "echo" || b == "printf") && OUTF[dep] != "") write_to(OUTF[dep], OUTA[dep], content)
+          if (b == "cat" || b == "tee") {
+            t = OUTF[dep]; x = OUTA[dep]
+            if (b == "tee") { for (j = k + 1; j <= n; j++) if (W[dep, j] == "-a") x = 1; else if (W[dep, j] !~ /^-/) { t = W[dep, j]; break } }
+            if (t != "" && HDN[dep] > 0 && HDK[dep, HDN[dep]] == "?") { HDK[dep, HDN[dep]] = "write"; HDF[dep, HDN[dep]] = t; HDA[dep, HDN[dep]] = x }
+            else if (t != "" && stdin != "" && k == n) write_to(t, x, stdin_text(stdin))
+            if (b == "cat" && k + 1 == n && OUTF[dep] == "") content = "\001" W[dep, n]
+          }
+          if (b ~ /^(psql|mysql|mariadb|sqlite3|mongo|mongosh|sqlcmd)$/ && HDN[dep] > 0 && HDK[dep, HDN[dep]] == "?") {
+            HDK[dep, HDN[dep]] = "db"; HDL[dep, HDN[dep]] = mark US b; for (x = k + 1; x <= n; x++) HDL[dep, HDN[dep]] = HDL[dep, HDN[dep]] US W[dep, x]; gsub(/[\n\r]/, " ", HDL[dep, HDN[dep]])
+          }
+          else emit(mark, b, dep, k + 1, n, (b ~ /^(psql|mysql|mariadb|sqlite3|mongo|mongosh|sqlcmd)$/ && stdin != "" && substr(stdin, 1, 1) != "\001") ? stdin : "")
+          if (W[dep, k] ~ /\// && b != "cd" && b != "pushd") parse(resolve(W[dep, k], 1), 1, dep + 1)
+          if (sep == "|") PIPEIN[dep] = content
+        }
+      }
+      for (x = 1; x <= HDN[dep]; x++) if (HDK[dep, x] == "?") HDK[dep, x] = ""
+      N[dep] = 0; RED[dep] = ""; OUTF[dep] = ""; OUTA[dep] = 0; INF[dep] = ""; HS[dep] = ""
+    }
+    { parse($0, 0, 0) } END { print "@@ok" }'
+)
 destructive_gate() {
   # Judged after stripping the heredoc body (= data). The secret check **does not strip** —
   # the axis is the opposite: writing a secret is itself the exposure, so the body is exactly what is judged.
   _record_db_creator_fns "$1"
   local DCMD; DCMD=$(_expand_shell_literals "$(_inline_listed_files "$(_unwrap_shell_c "$(_strip_heredoc_bodies "$1")")")")
   _GATE_CMD="$DCMD"
+  # What runs, one simple command per line (see _simple_cmds). The literal expansion runs on the raw command — the tokenizer needs the
+  # heredoc bodies (a script written with `cat > p.sh <<EOF` · `bash <<EOF`). $PWD = the session cwd the hook runs in (also what `git rev-parse` below reads)
+  local SC SQLX="" GITX="" _l
+  local -a _w
+  # The literal expansion only changes text with an assignment, a loop or a function — skipped otherwise (one awk less on most commands)
+  case "$1" in *=*|*for*|*'()'*) SC=$(_simple_cmds "$(_expand_shell_literals "$1")" "$PWD") || SC="" ;; *) SC=$(_simple_cmds "$1" "$PWD") || SC="" ;; esac   # a failed pass is caught below, not by the ERR trap (whose exit code would be awk's)
+  # Never fail open: without the end marker the pass died part-way and anything after that point was not seen.
+  # Not a dblock title — it is a hook failure, not a pattern, so it stays out of the block-reason count the manual quotes
+  if [ "${SC##*$'\n'}" != "@@ok" ] && [ "$SC" != "@@ok" ]; then
+    printf '❌ Blocked: the command could not be parsed for the destructive-command check\n\nImpact: a force push, DROP or reset inside it would go unchecked.\n' >&2
+    printf 'Safe alternative: split it into simpler commands, or run the parts separately.\n' >&2
+    exit 2
+  fi
+  while IFS=$'\037' read -r -a _w; do
+    [ "${#_w[@]}" -ge 2 ] || continue
+    _l="${_w[*]:1}"
+    case "${_w[1]}" in
+      git|rm) GITX+="$_l"$'\n' ;;
+      psql|mysql|mariadb|sqlite3|mongo|mongosh|sqlcmd|supabase|prisma|drizzle-kit|alembic) [ "${_w[0]}" = 1 ] && SQLX+="$_l"$'\n' ;;
+    esac
+  done <<< "$SC"
   local target="" _D
   dhas() { grep <<<"$_D" -Eqi -e "$1"; }
 
@@ -1090,7 +1378,7 @@ destructive_gate() {
     created_here="$created_here$(_db_targets "$seg" create)
 $(_db_creates_via_fns "$seg")
 "
-  done < <(_segments "$DCMD")
+  done < <(_segments "$DCMD"; printf '%s' "$SQLX")
   # Connection map — in segment order. A standalone assignment (`S=…` · `export DATABASE_URL=…`) carries forward, while an assignment before a command (`DATABASE_URL=… npm …`) applies to that command only
   local cmap="" segmap scratch_seg hd_delim="" a_lines
   while IFS= read -r seg; do
@@ -1157,10 +1445,10 @@ $(_db_creates_via_fns "$seg")
     dhas '(^|[^a-z_])update[[:space:]]+["a-z_][a-z0-9_."]*[[:space:]]+set[^;]*(;|$)' \
       && ! dhas '(^|[^a-z_])where([^a-z_]|$)' \
       && dwarn "UPDATE without WHERE — every row in the table changes" "Check that the range is narrowed with a WHERE clause"
-  done < <(_segments "$DCMD")
+  done < <(_segments "$DCMD"; printf '%s' "$SQLX")   # + SQL that reaches a client only through a wrapper · xargs · a script (mark 1)
 
   # Below looks at the whole command — a git command completes within a segment and this vocabulary never turns up in a descriptive argument
-  _D="$DCMD"
+  _D="$DCMD"$'\n'"$GITX"   # + git/rm as they run: global options stripped, eval · xargs · alias · script bodies resolved
 
   # ── git history destruction ─────────────────────────────────────────
   dhas 'git[[:space:]]+filter-branch|git[[:space:]]+filter-repo|git[[:space:]]+push[^|;&]*--mirror' \
@@ -1173,48 +1461,63 @@ $(_db_creates_via_fns "$seg")
   # `--delete main` and `:main` (remote branch deletion). Isolated injection confirmed all three exited 0 (evaluation v9 · E-61).
   # All four are one question: "does this change the remote history of a shared branch without other people's consent". The verdict rules
   # (target branch · pass when undecidable) stay as they are and **only the entrance** is widened.
-  local pushseg="" pmode=""
-  if dhas 'git[[:space:]]+push'; then
-    # -i like dhas above: on a case-insensitive filesystem (macOS APFS · Windows NTFS) `GIT push` runs git. A case-sensitive
-    # grep here found no segment, the pipeline failed under pipefail and the hook exited 1 — a hook error, not a block
-    pushseg=$(printf '%s' "$DCMD" | tr ';|&' '\n' | grep -Ei 'git[[:space:]]+push' | sed -n 1p)
-    if grep <<<"$pushseg" -Eq -- '(--force([^-]|$)|[[:space:]]-f([[:space:]]|$))' \
-       && ! grep <<<"$pushseg" -q -- '--force-with-lease'; then
-      pmode="force"
-    elif grep <<<"$pushseg" -Eq '[[:space:]]\+[A-Za-z0-9_./:-]+'; then
-      pmode="force"
-    elif grep <<<"$pushseg" -Eq -- '(^|[[:space:]])(--delete|-d)([[:space:]]|$)|[[:space:]]:[A-Za-z0-9_./-]+([[:space:]]|$)'; then
-      pmode="delete"
-    fi
-  fi
-  if [ -n "$pmode" ]; then
-    # The last non-flag token of an explicit refspec is taken as the target (the `+` of `+main` and the `src:` of `src:dst` are stripped)
-    target=$(printf '%s' "$pushseg" \
-             | awk '{n=0; for(i=1;i<=NF;i++) if($i !~ /^-/) t[++n]=$i; if(n>=4) print t[n]}')
-    target="${target#+}"; target="${target##*:}"
-    # With no refspec it is the current branch. HEAD is checked for existence first so that rev-parse does not
-    # die with exit 128 in a repo with 0 commits — if it is absent, it is left undecidable.
-    if [ -z "$target" ] && git rev-parse -q --verify HEAD >/dev/null 2>&1; then
-      target=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
-    fi
-    case "$target" in
-      main|master|develop|development|release|release/*|prod|production|stage|staging)
-        if [ "$pmode" = "delete" ]; then
-          dblock "remote deletion of a shared branch ($target)" \
-                 "The branch disappears from the remote, cutting other people's tracking branches and open PRs. Without a local copy there is no recovery" \
-                 "Check whether it is merged first, and do the deletion from the UI, through the host's branch protection rules"
-        fi
-        dblock "force push to a shared branch ($target)" \
-               "It overwrites remote history and commits other people pushed can disappear. Recovery requires their local copy" \
-               "git push --force-with-lease — it is refused when someone else's commits are there. Revert commits that are already public instead" ;;
-      ""|HEAD)
-        printf '⚠️  Undecidable: cannot confirm the target branch of the force push/delete\n' >&2
-        printf '     (outside a repo · detached HEAD · 0 commits). Not blocking, letting it through —\n' >&2
-        printf '     check for yourself whether the target is a shared branch, and use --force-with-lease.\n' >&2 ;;
-      *)
-        [ "$pmode" = "force" ] && dwarn "force push to a feature branch ($target)" "If the branch is shared, use --force-with-lease" ;;
-    esac
-  fi
+  # Judged on every `git push` that runs (_simple_cmds), not on the first one the text shows: a feature-branch push in front used to hide
+  # `&& git push --force origin main`, and quotes · `)` · `refs/heads/` around the branch name made the target read as another word.
+  local pmode pforce pdel pall plead pskip pn a r
+  local -a prefs
+  while IFS=$'\037' read -r -a _w; do
+    [ "${_w[1]:-}" = git ] && [ "${_w[2]:-}" = push ] || continue
+    pforce=0; pdel=0; pall=0; plead=0; pskip=0; pn=0; prefs=()
+    for a in "${_w[@]:3}"; do
+      [ "$pskip" = 1 ] && { pskip=0; continue; }
+      case "$a" in
+        --force-with-lease*|--force-if-includes) plead=1 ;;
+        --force) pforce=1 ;;
+        --delete) pdel=1 ;;
+        --all|--branches) pall=1 ;;
+        -o|--push-option|--repo|--receive-pack|--exec) pskip=1 ;;
+        --*) ;;
+        -*) case "$a" in *f*) pforce=1 ;; esac; case "$a" in *d*) pdel=1 ;; esac ;;   # a short-option cluster: -uf · -fd
+        *) pn=$((pn + 1)); [ "$pn" -ge 2 ] && prefs+=("$a") ;;   # the first word is the remote, the rest are refspecs
+      esac
+    done
+    [ "$plead" = 1 ] && pforce=0   # --force-with-lease is the safe form (a `+ref` is still forced below)
+    [ "${#prefs[@]}" -eq 0 ] && prefs=("")
+    for r in "${prefs[@]}"; do
+      pmode=""; [ "$pforce" = 1 ] && pmode="force"
+      case "$r" in +*) pmode="force"; r="${r#+}" ;; esac
+      case "$r" in :*) pmode="delete" ;; esac
+      [ "$pdel" = 1 ] && pmode="delete"
+      [ -n "$pmode" ] || continue
+      # The destination of `src:dst` is the target; `refs/heads/main` is main
+      target="${r##*:}"; target="${target#refs/heads/}"
+      [ "$pall" = 1 ] && [ -z "$r" ] && target="every branch (--all)"
+      # No refspec, HEAD, @ or the current-branch substitution = the current branch. HEAD is checked for existence first so that rev-parse does not
+      # die with exit 128 in a repo with 0 commits — if it is absent, it is left undecidable.
+      case "$target" in ""|HEAD|@|'$(git branch --show-current)'|'$(git rev-parse --abbrev-ref HEAD)'|'`git branch --show-current`')
+        target=""
+        git rev-parse -q --verify HEAD >/dev/null 2>&1 && target=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '') ;;
+      esac
+      case "$target" in *'$'*|*'`'*) target="" ;; esac   # a value computed at run time — undecidable, as before
+      case "$target" in
+        main|master|develop|development|release|release/*|prod|production|stage|staging|"every branch (--all)")
+          if [ "$pmode" = "delete" ]; then
+            dblock "remote deletion of a shared branch ($target)" \
+                   "The branch disappears from the remote, cutting other people's tracking branches and open PRs. Without a local copy there is no recovery" \
+                   "Check whether it is merged first, and do the deletion from the UI, through the host's branch protection rules"
+          fi
+          dblock "force push to a shared branch ($target)" \
+                 "It overwrites remote history and commits other people pushed can disappear. Recovery requires their local copy" \
+                 "git push --force-with-lease — it is refused when someone else's commits are there. Revert commits that are already public instead" ;;
+        ""|HEAD)
+          printf '⚠️  Undecidable: cannot confirm the target branch of the force push/delete\n' >&2
+          printf '     (outside a repo · detached HEAD · 0 commits · a name computed at run time). Not blocking, letting it through —\n' >&2
+          printf '     check for yourself whether the target is a shared branch, and use --force-with-lease.\n' >&2 ;;
+        *)
+          [ "$pmode" = "force" ] && dwarn "force push to a feature branch ($target)" "If the branch is shared, use --force-with-lease" ;;
+      esac
+    done
+  done <<< "$SC"
 
   # ── A process kill that kills its own shell — sent back before execution ────────────
   # `pkill -f PAT` (or `kill $(pgrep -f PAT)`) searches the whole command line for PAT, and the command line of the shell running this command also contains PAT
