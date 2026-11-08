@@ -2786,6 +2786,8 @@ FXP
       wj=$(bash -c 'source "$1" >/dev/null 2>&1; printf "{\"a\":\"x\"}" | jq -r .a' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
       [ "$wj" = x ] && ok "jq output carries no \\r on this Windows host" || bad "jq output on Windows still carries a CR (got '$(printf '%s' "$wj" | od -c | head -1)')"
       wpy2=$(bash -c 'source "$1" >/dev/null 2>&1; python3 -c "print(6*7)"' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+      wpy3=$(bash -c 'source "$1" >/dev/null 2>&1; python3 -c "print(chr(0x2260))"' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+      [ "$wpy3" = "$(printf '\342\211\240')" ] && ok "Python prints ≠ on this Windows host (UTF-8, no cp1252 crash)" || bad "Python output on Windows is not UTF-8 (got '${wpy3}')" "a check message holding ≠ or → would vanish"
       if [ "$wpy2" = 42 ]; then ok "python3 resolves to a working Python with no \\r on this Windows host"
       elif ! python -c 'import sys' >/dev/null 2>&1 && ! py -3 -c 'import sys' >/dev/null 2>&1; then warn "no Python installed on this Windows host — resolution unverified"
       else bad "python3 does not resolve to a working Python on Windows (got '$(printf '%s' "$wpy2" | od -c | head -1)')"; fi ;;
@@ -2811,6 +2813,11 @@ FXP
     [ "$wjq" = x ] && ok "  …native jq.exe CRLF stripped" || bad "jq CRLF not stripped on a Windows shell (got '$(printf '%s' "$wjq" | od -c | head -1)')"
     wpy=$(OSTYPE=darwin PATH="$wb:$PATH" bash -c 'source "$1" >/dev/null 2>&1; type -t python3' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
     [ "$wpy" = file ] && ok "  …and outside a Windows shell nothing is wrapped" || bad "the Windows resolver ran on a non-Windows shell (python3 is a $wpy)"
+    # A Windows console encodes Python's stdout as cp1252: "≠" or "→" in a check message raised UnicodeEncodeError and the
+    # FAIL never printed (guide-gate on windows-latest, CI run 6). The shims switch Python to UTF-8 on Windows shells
+    wpy=$(PYTHONIOENCODING=cp1252 OSTYPE=msys bash -c 'source "$1" >/dev/null 2>&1; python3 -c "print(chr(0x2260) + chr(0x2192))"' _ "$ROOT/scripts/lib/common.sh" 2>/dev/null || true)
+    [ "$wpy" = "$(printf '\342\211\240\342\206\222')" ] && ok "  …Python output stays UTF-8 under a cp1252 console (≠ → printed, no crash)" \
+      || bad "Python output under a cp1252 console lost a check message (got '${wpy}')" "a FAIL holding ≠ or → would vanish on Windows"
     rm -rf "$wb"
   fi ;;
   esac

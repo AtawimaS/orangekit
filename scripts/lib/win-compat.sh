@@ -9,6 +9,9 @@
 # trailing \r broke comparisons silently. Only on a Windows shell; macOS and Linux are untouched.
 case "${OSTYPE:-}" in
   msys*|cygwin*|win*)
+    # Python on Windows writes stdout in the console code page (cp1252): a message holding ≠ or → raised UnicodeEncodeError,
+    # the check died and its FAIL never printed — guide-gate passed bad stack cards on windows-latest (CI run 6)
+    export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
     _ok_py=""
     for _ok_c in python3 python "py -3"; do
       $_ok_c -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 && { _ok_py=$_ok_c; break; }

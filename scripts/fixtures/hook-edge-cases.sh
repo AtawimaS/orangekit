@@ -23,7 +23,11 @@ proj() {   # $1 dir → a git repo with one rule card owning migrations/** and s
   (cd "$1" && git init -q && git -c user.email=t@x -c user.name=t commit -q --allow-empty -m init)
   printf -- '---\npaths:\n  - "migrations/**"\n---\n# data card\n' > "$1/.claude/rules/data.md"
 }
-tu() { jq -nc --arg n "$1" --argjson i "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i}]}}'; }
+# Payload JSON is built with Git Bash's argument path conversion off: /tmp/… handed to jq.exe came back as C:/Users/…/Temp/…
+# while CLAUDE_PROJECT_DIR stayed /tmp/…, so no path was inside the project and E4's gate cases passed on windows-latest.
+# Only the builders — a jq that READS a file by path needs the conversion (jq.exe cannot open /tmp/…)
+jqb() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq "$@"; }
+tu() { jqb -nc --arg n "$1" --argjson i "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i}]}}'; }
 SURR='{"type":"user","message":{"content":[{"type":"tool_result","content":"build ok \ud83d"}]}}'   # lone surrogate: jq 1.7 rejects the line
 TRUNC='{"type":"assistant","message":{"content":[{"type":"tool_u'                                 # a last line cut mid-write
 sc() {   # $1 project  $2 payload JSON → stdout/stderr in $T/o $T/e, exit code in SC
@@ -35,8 +39,8 @@ bg() {   # $1 project  $2 transcript → build-gate stdout in BG
   BG=$(printf '{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"%s","transcript_path":"%s"}' "$1" "$2" \
     | (cd "$1" && CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$1" ORANGEKIT_STATE_DIR="$1/.st" bash "$R/scripts/build-gate.sh" 2>/dev/null))
 }
-write_in() { jq -nc --arg s "$1" --arg t "$2" --arg f "$3" --arg c "$4" '{session_id:$s,transcript_path:$t,cwd:($f|sub("/[^/]*/[^/]*$";"")),tool_name:"Write",tool_input:{file_path:$f,content:$c}}'; }
-bash_in() { jq -nc --arg s "$1" --arg t "$2" --arg d "$3" --arg c "$4" '{session_id:$s,transcript_path:$t,cwd:$d,tool_name:"Bash",tool_input:{command:$c}}'; }
+write_in() { jqb -nc --arg s "$1" --arg t "$2" --arg f "$3" --arg c "$4" '{session_id:$s,transcript_path:$t,cwd:($f|sub("/[^/]*/[^/]*$";"")),tool_name:"Write",tool_input:{file_path:$f,content:$c}}'; }
+bash_in() { jqb -nc --arg s "$1" --arg t "$2" --arg d "$3" --arg c "$4" '{session_id:$s,transcript_path:$t,cwd:$d,tool_name:"Bash",tool_input:{command:$c}}'; }
 
 # ── N1 · security-check with an unparseable transcript line ──────────────
 P="$T/n1"; proj "$P"
