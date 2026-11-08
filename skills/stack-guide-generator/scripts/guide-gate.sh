@@ -22,6 +22,7 @@
 #       "why models get it wrong" and precedence sentence as a pack card, but requires evidence (official URL ·
 #       check date · installed version) instead of a policy table and a stamp.
 #   guide-gate.sh --pair --contract <contract-file> --frontend <dir> --backend <dir>
+#   guide-gate.sh --pair --contract <bridge-contract-file> --frontend <dir> --app <dir>   (hybrid RN shell)
 #   guide-gate.sh --self-test   synthetic fixtures only (fast — run it on every harness change)
 #   guide-gate.sh --regress     + actually checks every shipped pack and every pre-built seam.
 #       Synthetic fixtures catch **misses**, real assets catch **false positives**. It is slow, so run it before shipping.
@@ -2014,12 +2015,12 @@ _resolve() {
 # Keeps only the rows of the contract that are cross-check material: list items and table rows. Backticks in prose
 # and block quotes (>) are description, not contract values — counting them turns a sentence like "the measurement showed
 # the backend used `/notes`" into a contract requirement (14 misreadings confirmed during development).
-# The '> surface: frontend|backend' declaration at the head of a section is read and tags that section's rows.
+# The '> surface: frontend|backend|app' declaration at the head of a section is read and tags that section's rows.
 # With no declaration it is both — existing contracts keep working.
 contract_rows_tagged() {
   awk '
     /^## /            { sfc="both" }
-    /^>[[:space:]]*surface:[[:space:]]*(frontend|backend|both)[[:space:]]*$/ {
+    /^>[[:space:]]*surface:[[:space:]]*(frontend|backend|app|both)[[:space:]]*$/ {
                         sub(/^>[[:space:]]*surface:[[:space:]]*/,""); gsub(/[[:space:]]/,"");
                         sfc=$0; next }
     # A bullet must have **whitespace after it** — if `**bold**` prose is read as a list,
@@ -2038,12 +2039,31 @@ contract_rows() { grep -E '^[[:space:]]*([-*][[:space:]]|\|)' "$1" | grep -vE '^
 run_pair() {
   printf "\n${C_D}guide-gate --pair${C_0}  contract: %s\n" "$CONTRACT"
   [ -f "$CONTRACT" ] || { printf "contract file missing: %s\n" "$CONTRACT" >&2; exit 2; }
-  [ -d "$FE" ] && [ -d "$BE" ] || { printf "guide directory missing (--frontend/--backend)\n" >&2; exit 2; }
+  # A bridge contract (web ↔ native shell) pairs the frontend with the app, the HTTP contract pairs it with the backend.
+  # Checked against the backend, every bridge token reads as missing (measured: "7 contract tokens are absent from backend").
+  local S2="backend" D2="$BE"
+  if grep -q '<!-- orangekit-bridge-contract' "$CONTRACT"; then
+    [ -z "$BE" ] || { printf -- "a bridge contract pairs --frontend with --app, not --backend\n" >&2; exit 2; }
+    S2="app"; D2="$APP"
+  elif [ -n "$APP" ]; then
+    printf -- "--app pairs only with a bridge contract (assets/bridge-contract.template.md)\n" >&2; exit 2
+  fi
+  [ -d "$FE" ] && [ -d "$D2" ] || { printf "guide directory missing (--frontend/--%s)\n" "$S2" >&2; exit 2; }
+
+  if [ "$S2" = "app" ]; then
+    sec "bridge contract filled in"
+    # A placeholder's < follows a space, a cell edge or a colon — a type like Promise<void> is not one
+    local ph; ph=$(num "$(contract_rows "$CONTRACT" | grep -cE '(^|[^A-Za-z0-9_])<[^>]+>')")
+    [ "$ph" -gt 0 ] && bad "${ph} bridge contract rows still hold a <placeholder>" "fill §4 routes and §5 screens with this project's values" \
+      || ok "no placeholder left in the bridge contract rows"
+  fi
 
   # Domain vocabulary: if §0 of the contract is empty, the two guides end up describing different resources.
   # In the measurement both pre-built pairs had frontend /tasks ↔ backend /notes.
-  sec "domain vocabulary"
-  if grep -q '^## 0\. Domain vocabulary' "$CONTRACT"; then
+  # The bridge has no HTTP resources — its route names are compared as tokens below.
+  [ "$S2" = "backend" ] && sec "domain vocabulary"
+  if [ "$S2" = "app" ]; then :
+  elif grep -q '^## 0\. Domain vocabulary' "$CONTRACT"; then
     local vocab; vocab=$(awk '/^## 0\. Domain vocabulary/{f=1;next} /^## /{f=0} f' "$CONTRACT" \
       | grep -E '^[[:space:]]*[-*][[:space:]]' \
       | grep -oE '`[A-Za-z_/][A-Za-z0-9_/-]*`' | tr -d '`' | sort -u)
@@ -2076,9 +2096,9 @@ run_pair() {
         | grep -oE '(^|[^0-9A-Za-z_])[1-5][0-9][0-9]([^0-9A-Za-z_]|$)' | grep -oE '[0-9]{3}'
     } | grep -vE "$NOISE" | sort -u
   }
-  _tok '^(both|frontend|backend)$' > "$TMP/tokens.txt"
+  _tok "^(both|frontend|$S2)\$" > "$TMP/tokens.txt"
   _tok '^(both|frontend)$' > "$TMP/tok_fe.txt"
-  _tok '^(both|backend)$'  > "$TMP/tok_be.txt"
+  _tok "^(both|$S2)\$"     > "$TMP/tok_be.txt"
 
   local ntok; ntok=$(num "$(wc -l < "$TMP/tokens.txt")")
   if [ "$ntok" -lt 5 ]; then
@@ -2094,11 +2114,13 @@ run_pair() {
   done < "$TMP/tok_fe.txt"
   while read -r t; do
     [ -z "$t" ] && continue
-    grep -rqw "$t" $(guide_files "$BE") 2>/dev/null || { mb="$mb $t"; nb=$((nb+1)); }
+    grep -rqw "$t" $(guide_files "$D2") 2>/dev/null || { mb="$mb $t"; nb=$((nb+1)); }
   done < "$TMP/tok_be.txt"
 
   [ "$nf" -gt 0 ] && bad "${nf} contract tokens are absent from frontend:$mf" "the frontend does not handle this part of the contract" || ok "every frontend contract token appears"
-  [ "$nb" -gt 0 ] && bad "${nb} contract tokens are absent from backend:$mb"  "the backend does not emit this part of the contract" || ok "every backend contract token appears"
+  [ "$nb" -gt 0 ] && bad "${nb} contract tokens are absent from $S2:$mb"  "the $S2 does not handle this part of the contract" || ok "every $S2 contract token appears"
+
+  [ "$S2" = "app" ] && return 0   # pagination and endpoints are HTTP-only
 
   sec "pagination model exclusivity"
   local model
@@ -2284,6 +2306,26 @@ run_self_test() {
   # is split at spaces, the gate **reads 0 files and passes everything** (it does not FAIL, it goes blind)
   mkdir -p "$fx/pk/sp ace" && cp -R "$fx/pk/noimport" "$fx/pk/sp ace/" \
     && _fx_assert_pack "$fx/pk/sp ace/noimport/fxpack2" 1 "a defect is caught even with a space in the path (the file list is not split)"
+
+  sec "wire contract pairing (--pair)"
+  if _fx_build_bridge "$fx/br"; then
+    _fx_assert_pair 0 "an HTTP contract both sides follow (frontend ↔ backend, unchanged)" "every backend contract token appears" \
+      --contract "$fx/br/wire.md" --frontend "$fx/br/wfe" --backend "$fx/br/wbe"
+    _fx_assert_pair 1 "an HTTP contract the backend breaks still FAILs" "absent from backend: 404 NOT_FOUND" \
+      --contract "$fx/br/wire.md" --frontend "$fx/br/wfe" --backend "$fx/br/wbe-bad"
+    _fx_assert_pair 0 "a bridge both sides follow (frontend ↔ app)" "every app contract token appears" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/fe" --app "$fx/br/app"
+    _fx_assert_pair 1 "the native allowlist holds web paths, not the route names the web sends" "absent from app" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/fe" --app "$fx/br/app-bad"
+    _fx_assert_pair 1 "the bridge template shipped unfilled" "still hold a <placeholder>" \
+      --contract "$fx/br/unfilled.md" --frontend "$fx/br/fe" --app "$fx/br/app"
+    _fx_assert_pair 2 "a bridge contract checked against the backend" "not --backend" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/fe" --backend "$fx/br/app"
+    _fx_assert_pair 2 "--app with an HTTP contract" "only with a bridge contract" \
+      --contract "$fx/br/http.md" --frontend "$fx/br/fe" --app "$fx/br/app"
+  else
+    bad "failed to build the --pair fixtures" "assets/bridge-contract.template.md is missing or its placeholders changed"
+  fi
 
   [ "$REGRESS" -eq 0 ] && { sec "regression corpus"; skip_note; }
 
@@ -3121,6 +3163,71 @@ FXP11
   return 0
 }
 
+# A blocked fixture must be blocked for the intended reason ($3), not for whatever FAIL comes first
+_fx_assert_pair() {
+  local want="$1" label="$2" why="$3"; shift 3
+  local out code=0
+  out=$(bash "$0" --pair "$@" 2>&1) || code=$?
+  if [ "$code" -eq "$want" ] && { [ -z "$why" ] || printf '%s' "$out" | grep -qF -- "$why"; }; then
+    ok "$label → exit $code"
+  else
+    bad "$label → exit $code (expected $want${why:+ for '$why'})" "$(printf '%s' "$out" | grep -E '✗|pass |bridge|--app' | head -3 | tr '\n' ';')"
+  fi
+}
+
+# Built from the shipped template, so the template and the gate cannot drift apart — if the marker or a surface tag
+# leaves the template, the harmless pair stops passing.
+_fx_build_bridge() {
+  local d="$1" tpl; tpl="$(dirname "$0")/../assets/bridge-contract.template.md"
+  [ -f "$tpl" ] || return 1
+  mkdir -p "$d/fe" "$d/app" "$d/app-bad" "$d/wfe" "$d/wbe" "$d/wbe-bad" || return 1
+  cp "$tpl" "$d/unfilled.md"
+  sed -e 's/^- Routes: <.*/- Routes: `camera` · `map`/' \
+      -e 's/^| <the native route group.*/| `(app)\/index` | `TrustedWebView` | `\/` |/' "$tpl" > "$d/bridge.md"
+  grep -q '^- Routes: `camera`' "$d/bridge.md" && grep -q '^| `(app)/index`' "$d/bridge.md" || return 1
+  grep -v 'orangekit-bridge-contract' "$d/bridge.md" > "$d/http.md"
+
+  cat > "$d/fe/SKILL.md" <<'FXBFE'
+# frontend fixture
+```ts
+const BRIDGE_VERSION = 1;
+type Msg = { type: string; version: number; payload?: unknown };
+post({ type: 'bridge.ready' }); post({ type: 'auth.refresh' }); post({ type: 'auth.signOut' });
+post({ type: 'nav.openNative', payload: { route: 'camera' } }); // or 'map'
+on('auth.token', (p) => save(p.accessToken, p.expiresAt));
+on('auth.cleared', endLocal); on('auth.unavailable', keepSession);
+```
+Served with `Content-Security-Policy: frame-src 'none'`.
+FXBFE
+  cat > "$d/app/SKILL.md" <<'FXBAPP'
+# app fixture
+```ts
+const BRIDGE_VERSION = 1;
+type Msg = { type: string; version: number; payload?: unknown };
+// receives bridge.ready · auth.refresh · auth.signOut · nav.openNative { route }
+// sends auth.token { accessToken, expiresAt } · auth.cleared · auth.unavailable
+const NATIVE_ROUTES = ['camera', 'map'];
+if (!isTrustedOrigin(url)) return;
+```
+`(app)/index` renders `TrustedWebView`.
+FXBAPP
+  sed -e "s#\['camera', 'map'\]#['/tasks', '/settings']#" "$d/app/SKILL.md" > "$d/app-bad/SKILL.md"
+
+  # A plain HTTP contract (no bridge marker) keeps pairing frontend ↔ backend exactly as before
+  cat > "$d/wire.md" <<'FXWC'
+## 0. Domain vocabulary
+- Entity: `Task`
+## 1. Success response envelope
+- Shape: `data` · `nextCursor` — pagination model: cursor
+## 4. Error code ↔ status mapping
+| `VALIDATION_FAILED` | `422` |
+| `NOT_FOUND` | `404` |
+FXWC
+  printf '# fe\n```ts\ntype Task = {}; const { data, nextCursor } = res; // VALIDATION_FAILED 422 · NOT_FOUND 404\n```\n' > "$d/wfe/SKILL.md"
+  printf '# be\n```ts\ntype Task = {}; reply({ data, nextCursor }); // VALIDATION_FAILED 422 · NOT_FOUND 404\n```\n' > "$d/wbe/SKILL.md"
+  sed 's/ · NOT_FOUND 404//' "$d/wbe/SKILL.md" > "$d/wbe-bad/SKILL.md"
+}
+
 _fx_assert() {
   local dir="$1" want="$2" label="$3"; shift 3
   local out code=0
@@ -3395,7 +3502,7 @@ FXPOLE
 
 # ════════════════════════════════════════════════════════════════════
 MODE=""; GUIDE=""; LEDGER=""; FORBID=""; PM=""; GENERATED=0
-CONTRACT=""; FE=""; BE=""; ASSEMBLY=""; CLAIMS_OUT=""; PACK_LEDGER_NAME="ledger.md"; PACK_POLICIES_NAME="policies.md"
+CONTRACT=""; FE=""; BE=""; APP=""; ASSEMBLY=""; CLAIMS_OUT=""; PACK_LEDGER_NAME="ledger.md"; PACK_POLICIES_NAME="policies.md"
 REGRESS=0
 # Word splitting happens **only at newlines and tabs**. There are more than 20 places that expand a file list
 # (`$(guide_files …)` · `$FILES`) unquoted, and with the default IFS a space in the path (`My Projects` · a Windows user home)
@@ -3416,6 +3523,7 @@ while [ $# -gt 0 ]; do
     --contract)  CONTRACT="${2:-}"; shift 2 || exit 2 ;;
     --frontend)  FE="${2:-}"; shift 2 || exit 2 ;;
     --backend)   BE="${2:-}"; shift 2 || exit 2 ;;
+    --app)       APP="${2:-}"; shift 2 || exit 2 ;;
     --ledger)    LEDGER="${2:-}"; shift 2 || exit 2 ;;
     --forbid)    FORBID="${2:-}"; shift 2 || exit 2 ;;
     --pm)        PM="${2:-}"; shift 2 || exit 2 ;;
@@ -3425,7 +3533,7 @@ while [ $# -gt 0 ]; do
     --pack-ledger-name)   PACK_LEDGER_NAME="${2:-}"; shift 2 || exit 2 ;;   # --self-test only
     --pack-policies-name) PACK_POLICIES_NAME="${2:-}"; shift 2 || exit 2 ;; # --self-test only
     --generated) GENERATED=1; shift ;;
-    -h|--help)   sed -n '2,32p' "$0" | sed -E 's/^#[[:space:]]?//'; exit 0 ;;
+    -h|--help)   sed -n '2,33p' "$0" | sed -E 's/^#[[:space:]]?//'; exit 0 ;;
     *)           printf "unknown option: %s (see --help)\n" "$1" >&2; exit 2 ;;
   esac
 done
