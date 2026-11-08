@@ -20,7 +20,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Environment
         run: |
@@ -31,7 +31,8 @@ jobs:
 
       - name: Shipped scripts are LF after checkout
         run: |
-          crlf=$(git ls-files '*.sh' | while IFS= read -r f; do grep -l "$(printf '\r')" "$f" 2>/dev/null; done)
+          # Actions runs bash with -e -o pipefail: grep -l exits 1 on a clean file, so it is guarded
+          crlf=$(git ls-files '*.sh' | while IFS= read -r f; do { grep -l "$(printf '\r')" "$f" 2>/dev/null || true; }; done)
           [ -z "$crlf" ] || { echo "CRLF in: $crlf"; exit 1; }
 
       - name: doctor --default
