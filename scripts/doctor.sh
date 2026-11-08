@@ -2616,7 +2616,9 @@ FXP
     ORANGEKIT_STATE_DIR="$rt" ORANGEKIT_ROOT="$rt" ORANGEKIT_HOOK_NAME="noisy-hook" \
       bash -c '. "$1/scripts/lib/common.sh"; orangekit_heartbeat 0' _ "$ROOT" >/dev/null 2>&1
     rn=$(num "$(wc -l < "$rt/hookrun.log" 2>/dev/null | tr -d ' ')")
-    if awk -F'|' '{print $1}' "$rt/hookrun.log" 2>/dev/null | grep -qx 'ghost-hook'; then
+    # One awk, no pipe: `awk | grep -qx` under pipefail read SIGPIPE as "not found" — ghost-hook is the first line, grep
+    # exits on it while awk still writes ~1000 lines (measured on ubuntu:24.04: 2/400 false "erased"; every ubuntu-latest run)
+    if awk -F'|' '$1 == "ghost-hook" { f = 1 } END { exit !f }' "$rt/hookrun.log" 2>/dev/null; then
       ok "the last evidence of a pushed-out hook survives rotation (${rn} lines)"
     else
       bad "rotation erased the evidence of a pushed-out hook (${rn} lines)" \
@@ -3438,7 +3440,7 @@ run_usage() {
     local unseen="" un=0 sname
     while IFS= read -r sname; do
       [ -z "$sname" ] && continue
-      awk -F'|' '{n=$2; sub(/^[^:]*:/,"",n); print n}' "$d/skilluse.log" 2>/dev/null | grep -qx "$sname" \
+      awk -F'|' -v s="$sname" '{n=$2; sub(/^[^:]*:/,"",n); if (n == s) f = 1} END {exit !f}' "$d/skilluse.log" 2>/dev/null \
         || { un=$((un+1)); unseen="$unseen $sname"; }
     done < <(ls -1 "$PLUGIN_ROOT/skills" 2>/dev/null)
     if [ "$un" -gt 0 ]; then
