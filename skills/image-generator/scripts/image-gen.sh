@@ -9,8 +9,9 @@
 #          new file from $CODEX_HOME/generated_images/ (Codex's own default, per its bundled imagegen skill), copies it
 #          to --out and verifies the signature. A file that did not appear there is not accepted: a placeholder drawn
 #          with code is a valid PNG too, and must not pass as a generated image.
-#          Earlier measurement (codex 0.154.0, 2026-09): `image_gen` was absent from `codex exec`. If this Codex still
-#          lacks it, Codex answers IMAGEGEN_UNAVAILABLE and the run ends as undecidable (exit 2) → handoff mode.
+#          Measured: absent from `codex exec` in codex 0.154.0 (2026-09); works in codex-cli 0.163.0 (2026-11-08, real
+#          run: 1254×1254 PNG for a 1024×1024 request). A Codex without it answers IMAGEGEN_UNAVAILABLE and the run
+#          ends as undecidable (exit 2) → handoff mode.
 #
 #   image-gen.sh --probe
 #   image-gen.sh --estimate [--size WxH] [--quality Q] [-n N]

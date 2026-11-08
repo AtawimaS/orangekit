@@ -183,7 +183,9 @@ When the file arrives, **verify the spec** — dimensions, format, non-zero byte
 - **Transparent background**: `background=transparent` is valid per the API docs, but gpt-image-2.5-flare's
   actual alpha quality has not been verified in this repository. If you need a clean cutout, check the result by eye
 - **Dimension determinism**: the model restructures the prompt, so the requested dimensions and the result can diverge
-- **The Codex CLI path depends on the Codex version**: its built-in `image_gen` was measured absent from `codex exec`
-  in codex 0.154.0 (2026-09); its bundled imagegen skill now describes it as the default path with no API key.
-  The script does not assume either — Codex answers `IMAGEGEN_UNAVAILABLE` when the tool is missing and the run
+- **The Codex CLI path depends on the Codex version**: `image_gen` was absent from `codex exec` in codex 0.154.0
+  (2026-09) and works in codex-cli 0.163.0 (measured 2026-11-08: a 1024×1024 request returned a 1254×1254 PNG in
+  ~50 s). The script assumes neither — Codex answers `IMAGEGEN_UNAVAILABLE` when the tool is missing and the run
   ends as undecidable (exit 2), so the skill falls back to handoff instead of failing
+- **Codex picks the output size**: the requested dimensions are a request, not a guarantee. When they differ,
+  tell the user and offer a local resize (`sips -z H W <file>` on macOS) rather than another Codex run

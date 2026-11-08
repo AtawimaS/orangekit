@@ -37,33 +37,45 @@ jobs:
           [ -z "$crlf" ] || { echo "CRLF in: $crlf"; exit 1; }
 
       - name: doctor --default
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash scripts/doctor.sh --default
       - name: doctor --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash scripts/doctor.sh --self-test
       - name: doctor --consumer
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash scripts/doctor.sh --consumer
       - name: skill-lint
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: |
           bash skills/skill-enhancer/scripts/skill-lint.sh --self-test
           bash skills/skill-enhancer/scripts/skill-lint.sh skills/*/ marketing/skills/*/ harness/skills/*/
       - name: orangekit-update --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash skills/orangekit-update/scripts/orangekit-update.sh --self-test
       - name: orangekit-feedback drafts --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash skills/orangekit-feedback/scripts/drafts.sh --self-test
       - name: image-gen --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash skills/image-generator/scripts/image-gen.sh --self-test
       - name: guide-gate --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash skills/stack-guide-generator/scripts/guide-gate.sh --self-test
       - name: pack-smoke --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash skills/stack-guide-generator/scripts/pack-smoke.sh --self-test
       - name: pack-refresh --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash harness/skills/pack-refresh/scripts/pack-refresh.sh --self-test
       - name: routing-eval --self-test
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: bash harness/skills/harness-evaluation/scripts/routing-eval.sh --self-test
 
       # Measurement, not a gate: security-check spawns ~70–90 processes per Bash call (measured on macOS), and process
       # creation is far slower under Git Bash. The hook timeout is 15s — past it the command runs unchecked
       - name: Hook latency (security-check, typical Bash calls)
+        if: ${{ !cancelled() }}   # keep going after a failure so every OS reports every step
         run: |
           p="$RUNNER_TEMP/latency" && mkdir -p "$p" && cd "$p" && git init -q
           TIMEFORMAT='%R s'

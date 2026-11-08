@@ -2241,13 +2241,17 @@ SKCASES
     mkdir -p "$nd/.claude/rules" "$nd/migrations" "$nd/tr"
     for glabel in data-modeling ui-design code-change workflow-routing; do cp "$ROOT/rules/$glabel.md" "$nd/.claude/rules/"; done
     : > "$nd/migrations/0001_init.sql"
+    # Git Bash rewrites /tmp/… arguments to C:/Users/…/Temp/… when it calls a native program (jq.exe), so the fixture JSON
+    # said C:/… while CLAUDE_PROJECT_DIR stayed /tmp/… — no file was ever inside the root and all 12 gate cases passed
+    # silently on windows-latest. The JSON is built with conversion off (ignored on macOS and Linux)
+    _jqraw() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq "$@"; }
     _tl() {   # one transcript line: C | R path [limit] | B command | S skill | U user sentence
       case "$1" in
         C) jq -nc '{type:"system",subtype:"compact_boundary"}' ;;
-        R) jq -nc --arg v "$2" --arg l "${3:-}" '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:({file_path:$v} + (if $l=="" then {} else {limit:($l|tonumber)} end))}]}}' ;;
-        B) jq -nc --arg v "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:$v}}]}}' ;;
-        S) jq -nc --arg v "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:"Skill",input:{skill:$v}}]}}' ;;
-        U) jq -nc --arg v "$2" '{type:"user",message:{content:$v}}' ;;
+        R) _jqraw -nc --arg v "$2" --arg l "${3:-}" '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:({file_path:$v} + (if $l=="" then {} else {limit:($l|tonumber)} end))}]}}' ;;
+        B) _jqraw -nc --arg v "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:$v}}]}}' ;;
+        S) _jqraw -nc --arg v "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:"Skill",input:{skill:$v}}]}}' ;;
+        U) _jqraw -nc --arg v "$2" '{type:"user",message:{content:$v}}' ;;
       esac; }
     local rr="$nd/.claude/rules"
     : > "$nd/tr/none.jsonl"
@@ -2263,7 +2267,7 @@ SKCASES
     _tl U "<command-name>/dev-docs-generator</command-name> feature 1" > "$nd/tr/docs-cmd.jsonl"
     _gate() {   # $1 tool $2 path or command (\n allowed) $3 transcript (-=none) $4 session
       local a; a=$(printf '%b' "$2")
-      jq -nc --arg t "$1" --arg a "$a" --arg tp "$3" --arg s "$4" --arg cwd "$nd" \
+      _jqraw -nc --arg t "$1" --arg a "$a" --arg tp "$3" --arg s "$4" --arg cwd "$nd" \
         '{session_id:$s,cwd:$cwd,tool_name:$t,hook_event_name:"PreToolUse"}
          + (if $t=="Bash" then {tool_input:{command:$a}} else {tool_input:{file_path:$a,content:"x",old_string:"a",new_string:"b"}} end)
          + (if $tp=="-" then {} else {transcript_path:$tp} end)' \
@@ -2279,7 +2283,7 @@ SKCASES
       if [ "$gcode" -eq "$gwant" ] && { [ "$gexp" = "-" ] || printf '%s' "$gerr" | grep -qF -- "$gexp"; }; then
         gok=$((gok+1))
       else
-        gbad=$((gbad+1)); bad "prior-knowledge gate: $glabel → exit $gcode (expected $gwant, reason \"$gexp\")" "$(printf '%s' "$gerr" | head -3)"
+        gbad=$((gbad+1)); bad "prior-knowledge gate: $glabel → exit $gcode (expected $gwant, reason \"$gexp\")" "$(printf '%s' "$gerr" | head -3)$(case "${OSTYPE:-}" in msys*|cygwin*|win*) printf ' [windows: root=%s · fixture path as jq sees it=%s]' "$nd" "$(_jqraw -nr --arg a "$nd/x" '$a' 2>&1 | head -1)" ;; esac)"
       fi
     }
     for gphase in norunner runner; do
