@@ -2120,7 +2120,7 @@ run_pair() {
   [ "$nf" -gt 0 ] && bad "${nf} contract tokens are absent from frontend:$mf" "the frontend does not handle this part of the contract" || ok "every frontend contract token appears"
   [ "$nb" -gt 0 ] && bad "${nb} contract tokens are absent from $S2:$mb"  "the $S2 does not handle this part of the contract" || ok "every $S2 contract token appears"
 
-  [ "$S2" = "app" ] && return 0   # pagination and endpoints are HTTP-only
+  [ "$S2" = "app" ] && { check_bridge_shapes; return 0; }   # pagination and endpoints are HTTP-only
 
   sec "pagination model exclusivity"
   local model
@@ -2154,6 +2154,137 @@ run_pair() {
   [ "$miss" -eq 0 ] \
     && ok "all ${tot} paths the frontend calls were found in the backend" \
     || rev "${miss} frontend call paths not found in the backend:$missing" "normal for an illustrative fictional path, but if it is the real contract one side is missing"
+}
+
+# Payload shape (bridge only): the token check passes when both sides name `auth.token` but one sends { accessToken, expiresAt }
+# and the other reads { token }. For each §2 message row, the keys each guide's code uses for that message must equal the
+# row's `payload` keys (`none` = no payload at all — BEFORE's measured bug was `payload: {}` against an omitted payload).
+# A guide "uses" a message through (a) an object literal or TS type with `type: 'x'` on one line — its `payload: { … }` top-level
+# keys, or no payload when the object closes without one — and (b) `.payload.k` reads and `{ k } = ….payload` inside a
+# `case 'x':` / `=== 'x'` block (ended by the next line at the same or lower indent). Fences only, via codelines (comments
+# and ❌ spans excluded). Anything else — a multi-line literal, `payload: p`, a spread — is not guessed: a message with no
+# readable usage is REVIEW, never FAIL. A key missing on reads alone is REVIEW too (a receiver may ignore a key).
+check_bridge_shapes() {
+  sec "bridge payload shape"
+  awk -F'|' '
+    /^## / { insec = ($0 ~ /^## [0-9]+\.[[:space:]]*Messages/); pc=0; next }
+    !insec || $0 !~ /^[[:space:]]*\|/ { next }
+    { sub(/\r$/,"") }
+    !pc { for (i=2; i<=NF; i++) if ($i ~ /payload/) pc=i; if (!pc) insec=0; next }
+    $0 ~ /^[[:space:]|:-]+$/ { next }
+    !match($2, /`[^`]+`/) { next }
+    { t=substr($2,RSTART+1,RLENGTH-2); p=$pc; k=""
+      if (p ~ /^[[:space:]]*none[[:space:]]*$/) { print t "\tnone\t"; next }
+      while (match(p, /`[^`]+`/)) { k = k " " substr(p,RSTART+1,RLENGTH-2); p=substr(p,RSTART+RLENGTH) }
+      print t "\t" (k=="" ? "unparsed" : "keys") "\t" substr(k,2) }
+  ' "$CONTRACT" > "$TMP/shape.txt"
+
+  local nmsg; nmsg=$(num "$(awk -F'\t' '$2!="unparsed"' "$TMP/shape.txt" | wc -l)")
+  if [ "$nmsg" -eq 0 ]; then
+    rev "no §2 Messages table with a payload column was found" "write each payload key in its own backticks, or none (assets/bridge-contract.template.md §2)"
+    return 0
+  fi
+  local odd; odd=$(awk -F'\t' '$2=="unparsed"{printf " %s",$1}' "$TMP/shape.txt")
+  [ -n "$odd" ] && rev "the payload cell of these messages names no key in backticks:$odd" "write each key in its own backticks, or none — the shape check skips them"
+
+  local side dir out f r
+  for side in frontend app; do
+    [ "$side" = frontend ] && dir="$FE" || dir="$APP"
+    # shellcheck disable=SC2046
+    out=$(codelines $(guide_files "$dir") | awk -F'\t' -v SHAPES="$TMP/shape.txt" '
+      BEGIN { while ((getline l < SHAPES) > 0) { split(l, a, "\t"); if (a[2]!="unparsed") { kind[a[1]]=a[2]; want[a[1]]=a[3] } } }
+      function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+      # s at i is an opening {; fills SEG[1..NSEG] with its top-level members, returns the index of its closing } (0 = not on this line)
+      function scan(s, i,   d, ch, q, seg) {
+        NSEG=0; d=0; q=""; seg=""
+        for (; i<=length(s); i++) {
+          ch=substr(s,i,1)
+          if (q!="") { seg=seg ch; if (ch=="\\") { i++; seg=seg substr(s,i,1) } else if (ch==q) q=""; continue }
+          if (ch=="\"" || ch=="\x27" || ch=="`") { q=ch; seg=seg ch; continue }
+          if (ch ~ /[[({]/) { d++; if (d==1) continue }
+          else if (ch ~ /[])}]/) { d--; if (d==0) { SEG[++NSEG]=seg; return i } }
+          if (d==1 && (ch=="," || ch==";")) { SEG[++NSEG]=seg; seg=""; continue }
+          seg=seg ch
+        }
+        return 0
+      }
+      function keyof(s) { s=trim(s); if (s=="") return ""
+        if (match(s, /^["\x27]?[A-Za-z_$][A-Za-z0-9_$]*["\x27]?\??[[:space:]]*(:|$)/)) {
+          s=substr(s,1,RLENGTH); gsub(/["\x27?:[:space:]]/, "", s); return s }
+        return "?" }
+      # the object literal / type around a `type: x` at position p of s
+      function literal(t, s, p,   j, d, ch, e, n, i, pl, k, keys, bad) {
+        d=0
+        for (j=p-1; j>=1; j--) { ch=substr(s,j,1)
+          if (ch ~ /[])}]/) d++
+          else if (ch ~ /[[({]/) { if (d==0) break; d-- } }
+        if (j<1 || substr(s,j,1)!="{") { unp[t]++; return }
+        if (!scan(s, j)) { unp[t]++; return }
+        pl=""; for (i=1; i<=NSEG; i++) if (keyof(SEG[i])=="payload") pl=SEG[i]
+        if (pl=="") { decl[t]++; return }
+        sub(/^[^:]*:[[:space:]]*/, "", pl); pl=trim(pl)
+        if (substr(pl,1,1)!="{" || scan(pl, 1)!=length(pl)) { unp[t]++; return }
+        n=NSEG; keys=""; bad=0
+        for (i=1; i<=n; i++) { k=keyof(SEG[i]); if (k=="?") bad=1; else if (k!="") keys=keys " " k }
+        if (bad) { unp[t]++; return }
+        decl[t]++; haspl[t]=1; addkeys(t, keys, DK)
+      }
+      function addkeys(t, keys, A,   m, x, i) { m=split(keys, x, " "); for (i=1; i<=m; i++) A[t SUBSEP x[i]]=1 }
+      {
+        s=$3; sub(/\r$/, "", s)
+        if ($4!=fid) { fid=$4; cur="" }
+        ind=match(s, /[^[:space:]]/) ? RSTART : 0
+        if (cur!="" && ind && ind<=cind) cur=""
+        # block starts: one known type per line, else ambiguous
+        r=s; hit=""; nh=0
+        while (match(r, /(case|===)[[:space:]]*["\x27][^"\x27]+["\x27]/)) {
+          x=substr(r,RSTART,RLENGTH); r=substr(r,RSTART+RLENGTH)
+          sub(/^(case|===)[[:space:]]*["\x27]/, "", x); sub(/["\x27]$/, "", x)
+          if (x in kind && x!=hit) { hit=x; nh++ } }
+        if (nh==1) { cur=hit; cind=ind } else if (nh>1) cur=""
+        if (cur!="") {
+          r=s; while (match(r, /payload\??\.[A-Za-z_$][A-Za-z0-9_$]*/)) {
+            x=substr(r,RSTART,RLENGTH); r=substr(r,RSTART+RLENGTH); sub(/^payload\??\./, "", x); RK[cur SUBSEP x]=1; nread[cur]++ }
+          if (match(s, /\{[^{}]*\}[[:space:]]*=[[:space:]]*[A-Za-z_$.?]*payload[[:space:]]*;?[[:space:]]*$/)) {
+            x=substr(s,RSTART+1); sub(/\}.*/, "", x); gsub(/:[^,]*/, "", x); gsub(/[[:space:]]/, "", x); gsub(/,/, " ", x)
+            addkeys(cur, x, RK); nread[cur]++ }
+        }
+        # literals / types: every `type: x` on the line
+        r=s; off=0
+        while (match(r, /["\x27]?type["\x27]?\??[[:space:]]*:[[:space:]]*["\x27`][^"\x27`]+["\x27`]/)) {
+          x=substr(r,RSTART,RLENGTH); p=off+RSTART; off+=RSTART+RLENGTH-1; r=substr(r,RSTART+RLENGTH)
+          sub(/^[^:]*:[[:space:]]*./, "", x); x=substr(x, 1, length(x)-1)
+          if (x in kind) literal(x, s, p) }
+      }
+      END {
+        for (t in kind) {
+          if (!decl[t] && !nread[t]) { rv = rv " `" t "`" (unp[t] ? " (not a one-line literal)" : ""); continue }
+          m=split(want[t], w, " "); delete W; for (i=1; i<=m; i++) W[w[i]]=1
+          ex=""; for (k in DK) { split(k, z, SUBSEP); if (z[1]==t && !(z[2] in W)) ex=ex " " z[2] }
+          for (k in RK) { split(k, z, SUBSEP); if (z[1]==t && !(z[2] in W) && !((t SUBSEP z[2]) in DK)) ex=ex " " z[2] }
+          mi=""; for (i=1; i<=m; i++) if (!((t SUBSEP w[i]) in DK) && !((t SUBSEP w[i]) in RK)) mi=mi " " w[i]
+          if (kind[t]=="none" && haspl[t] && ex=="") ex=" {}"
+          d=""
+          if (ex!="") d = d (kind[t]=="none" ? " sends a payload the contract says is none:" : " extra:") ex
+          if (mi!="" && decl[t]) d = d (d=="" ? "" : ";") " missing:" mi
+          if (d!="") fl = fl "\n`" t "`" d
+          else if (mi!="") rv = rv " `" t "` (reads only, never" mi ")"
+          else okn++
+        }
+        printf "OK\t%d\nFAIL\t%s\nREVIEW\t%s\n", okn, substr(fl,2), rv
+      }')
+    f=$(printf '%s\n' "$out" | awk '/^FAIL\t/{sub(/^FAIL\t/,""); p=1} /^REVIEW\t/{p=0} p' | sed '/^$/d')
+    r=$(printf '%s\n' "$out" | sed -n 's/^REVIEW	//p')
+    if [ -n "$f" ]; then
+      bad "$side payload keys differ from the bridge contract §2: $(printf '%s' "$f" | tr '\n' '|' | sed 's/|/ · /g')" \
+        "both sides must use exactly the payload keys of the §2 row (none = no payload key at all)"
+    else
+      ok "$side: $(printf '%s\n' "$out" | sed -n 's/^OK	//p') message payloads match the contract"
+    fi
+    [ -n "$r" ] && rev "$side: cannot tell which payload keys these messages use:$r" \
+      "write each message as a one-line literal or type — { type: 'x', payload: { a, b } } — so the gate can read it"
+  done
+  return 0
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -2323,6 +2454,19 @@ run_self_test() {
       --contract "$fx/br/bridge.md" --frontend "$fx/br/fe" --backend "$fx/br/app"
     _fx_assert_pair 2 "--app with an HTTP contract" "only with a bridge contract" \
       --contract "$fx/br/http.md" --frontend "$fx/br/fe" --app "$fx/br/app"
+    _fx_assert_pair 0 "payload keys both sides use match §2" "app: 7 message payloads match" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/sfe" --app "$fx/br/sapp"
+    _fx_assert_pair 1 "the app drops a §2 payload key (auth.token without expiresAt)" "missing: expiresAt" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/sfe" --app "$fx/br/sapp-miss"
+    _fx_assert_pair 1 "the frontend reads a payload key §2 does not list" "extra: token" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/sfe-extra" --app "$fx/br/sapp"
+    _fx_assert_pair 1 "a payload on a message §2 says is none" "contract says is none: reason" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/sfe" --app "$fx/br/sapp-none"
+    _fx_assert_pair 0 "usage the gate cannot read is REVIEW, not FAIL" "cannot tell which payload keys" \
+      --contract "$fx/br/bridge.md" --frontend "$fx/br/fe" --app "$fx/br/app"
+    if bash "$0" --pair --contract "$fx/br/wire.md" --frontend "$fx/br/wfe" --backend "$fx/br/wbe" 2>&1 | grep -q 'payload shape'; then
+      bad "an HTTP --pair ran the bridge payload shape check"
+    else ok "an HTTP --pair has no payload shape check (unchanged)"; fi
   else
     bad "failed to build the --pair fixtures" "assets/bridge-contract.template.md is missing or its placeholders changed"
   fi
@@ -3212,6 +3356,37 @@ if (!isTrustedOrigin(url)) return;
 `(app)/index` renders `TrustedWebView`.
 FXBAPP
   sed -e "s#\['camera', 'map'\]#['/tasks', '/settings']#" "$d/app/SKILL.md" > "$d/app-bad/SKILL.md"
+
+  # Payload shapes against §2 of the template (auth.token: accessToken · expiresAt, nav.openNative: route, the rest none).
+  # The plain fe/app fixtures above use no readable literal, so they double as the "cannot tell → REVIEW" case.
+  local v
+  for v in sfe sapp sapp-miss sfe-extra sapp-none; do mkdir -p "$d/$v" || return 1; done
+  cat > "$d/shape.fence" <<'FXSHAPE'
+```ts
+type WebToNative = { type: 'bridge.ready' } | { type: 'auth.refresh' } | { type: 'auth.signOut' } | { type: 'nav.openNative'; payload: { route: string } };
+type NativeToWeb = { type: 'auth.token'; payload: { accessToken: string; expiresAt: number } } | { type: 'auth.cleared' } | { type: 'auth.unavailable' };
+function onNative(msg: NativeToWeb) {
+  switch (msg.type) {
+    case 'auth.token': {
+      const { accessToken, expiresAt } = msg.payload;
+      save(accessToken, expiresAt);
+      break;
+    }
+    case 'auth.cleared':
+      endLocal();
+  }
+}
+send({ type: 'auth.token', payload: { accessToken: t, expiresAt: exp * 1000 } });
+```
+FXSHAPE
+  cat "$d/fe/SKILL.md" "$d/shape.fence" > "$d/sfe/SKILL.md"
+  cat "$d/app/SKILL.md" "$d/shape.fence" > "$d/sapp/SKILL.md"
+  sed -e 's/accessToken: string; expiresAt: number/accessToken: string/' -e 's/, expiresAt: exp \* 1000//' \
+      -e 's/const { accessToken, expiresAt }/const { accessToken }/' "$d/sapp/SKILL.md" > "$d/sapp-miss/SKILL.md"
+  sed -e 's/save(accessToken, expiresAt);/save(accessToken, expiresAt, msg.payload.token);/' "$d/sfe/SKILL.md" > "$d/sfe-extra/SKILL.md"
+  sed -e "s/send({ type: 'auth.token'/send({ type: 'auth.cleared', payload: { reason: 'expired' } }); &/" "$d/sapp/SKILL.md" > "$d/sapp-none/SKILL.md"
+  ! cmp -s "$d/sapp/SKILL.md" "$d/sapp-miss/SKILL.md" && ! cmp -s "$d/sfe/SKILL.md" "$d/sfe-extra/SKILL.md" \
+    && ! cmp -s "$d/sapp/SKILL.md" "$d/sapp-none/SKILL.md" || return 1
 
   # A plain HTTP contract (no bridge marker) keeps pairing frontend ↔ backend exactly as before
   cat > "$d/wire.md" <<'FXWC'

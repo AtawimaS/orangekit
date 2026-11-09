@@ -46,6 +46,10 @@ pack's `TrustedWebView` (`webview.md`). `payload` is absent when a row below say
 | `auth.signOut` | web → native | none | `auth.cleared` |
 | `nav.openNative` | web → native | `route` | — |
 
+The `payload` cell is `none` or each key in its own backticks. `--pair` checks that each guide uses exactly those keys, so write
+each message in code as a one-line literal or type — `{ type: 'auth.token', payload: { accessToken, expiresAt } }`, none means no
+`payload` key at all, not `payload: {}` — or read it as `msg.payload.key` inside its `case`; a message it cannot read is REVIEW.
+
 `expiresAt` is epoch milliseconds. When the identity provider returns no lifetime, native sends the access token's `exp` claim × 1000 —
 never 0, which makes every web request ask for a refresh.
 
