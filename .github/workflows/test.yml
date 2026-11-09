@@ -9,6 +9,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege; actions: read lets the last step read this job's step times back from the API
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   suite:
     strategy:
@@ -21,6 +26,22 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+
+      # Windows only: Defender scans every process launch and file touch, and the suite starts tens of thousands of
+      # short-lived jq.exe / awk / grep processes (run 7: doctor --self-test 27.5 min, guide-gate 15.8 min, job 53.4 min).
+      # Excluding the workspace, the temp dirs the tests write to, Git for Windows (bash, awk, sed…) and jq's directory
+      # changes no test — only the scan overhead. continue-on-error: a runner without the cmdlet still runs the suite.
+      - name: Exclude test paths from Defender (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, 'C:\Program Files\Git')
+          $jq = Get-Command jq -ErrorAction SilentlyContinue
+          if ($jq) { $paths += (Split-Path $jq.Source) }
+          $paths = $paths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          Add-MpPreference -ExclusionPath $paths
+          Write-Host "Defender exclusions:"; (Get-MpPreference).ExclusionPath | ForEach-Object { Write-Host "  $_" }
 
       - name: Environment
         run: |
@@ -84,3 +105,15 @@ jobs:
             { time (jq -nc --arg c "$c" --arg cwd "$p" '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},cwd:$cwd,session_id:"ci"}' \
                 | CLAUDE_PLUGIN_ROOT="$GITHUB_WORKSPACE" CLAUDE_PROJECT_DIR="$p" bash "$GITHUB_WORKSPACE/scripts/security-check.sh" >/dev/null 2>&1); } 2>&1
           done
+
+      # Per-step durations of this job, so runs can be compared without opening each step in the UI
+      - name: Step times
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --jq '
+            .jobs[] | select(.name | contains("${{ matrix.os }}")) | .steps[] | select(.completed_at != null)
+            | ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) as $s
+            | "\(if $s >= 90 then "\($s / 60 * 10 | floor / 10) min" else "\($s) s" end)\t\(.conclusion)\t\(.name)"' \
+            | awk -F'\t' '{ printf "%-9s %-9s %s\n", $1, $2, $3 }' || echo "step times unavailable (API or token)"
