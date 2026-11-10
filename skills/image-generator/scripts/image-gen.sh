@@ -438,6 +438,20 @@ FAKE
   [ "$out" = "|dead" ] && ok "Windows without a Windows pid: no taskkill, the kill still runs" || bad "taskkill ran without a Windows pid — '$out'"
   out=$(st_case darwin 4242 0)
   [ "$out" = "|dead" ] && [ "$(st_case linux-gnu 4242 0)" = "|dead" ] && ok "macOS · Linux: only the kill, as before (no taskkill)" || bad "taskkill ran outside Windows — '$out'"
+  # Real Windows only: npm's codex there is a sh shim that execs node.exe, which spawns the native binary as a child
+  case "${OSTYPE:-}" in msys*|cygwin*)
+    if command -v node >/dev/null 2>&1 && command -v tasklist >/dev/null 2>&1; then
+      printf '%s\n' "require('child_process').spawn(process.execPath, ['-e', 'require(\"fs\").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1e9)', process.argv[2]], { stdio: 'ignore' }); setInterval(() => {}, 1e9)" > "$t/node-parent.js"
+      printf '#!/bin/sh\nexec node "%s" "$@"\n' "$t/node-parent.js" > "$t/npm-codex"; chmod +x "$t/npm-codex"
+      local p cw n=0; ( exec "$t/npm-codex" "$t/child.pid" ) & p=$!
+      while [ ! -s "$t/child.pid" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n+1)); done
+      cw=$(cat "$t/child.pid" 2>/dev/null); stop_tree "$p"; sleep 1; kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null
+      if [ -z "$cw" ]; then bad "npm-codex shape: the node child never started"
+      elif tasklist //FI "PID eq $cw" //NH 2>/dev/null | grep -qi node; then
+        bad "Windows: node.exe's native child (codex.exe in npm's codex) survived the watchdog stop"; taskkill //F //PID "$cw" >/dev/null 2>&1
+      else ok "Windows (real): the watchdog stop also ends node.exe's native child, as npm's codex runs codex.exe"; fi
+    fi ;;
+  esac
 
   # Price notice — gpt-image-2.5-flare has no published per-size price, so everything must be 'unknown'
   estimate 1024x1024 medium 1 | grep -q 'unknown' \

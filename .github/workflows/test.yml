@@ -103,6 +103,11 @@ jobs:
           n=0; while [ ! -s "$T/mark" ] && [ $n -lt 50 ]; do sleep 0.2; n=$((n+1)); done
           [ -s "$T/mark" ] || { echo "FAIL the warm worker never reached the index build"; exit 1; }
           w=$(cat "$T/mark"); echo "worker running · busy jq.exe: $(njq)"
+          # Diagnostics: MSYS pids/groups and each jq.exe's Windows parent — what the 20 s kill has to reach
+          ps || true
+          powershell -NoProfile -Command - <<'PS' || true
+          Get-CimInstance Win32_Process -Filter "Name = 'jq.exe'" | ForEach-Object { 'jq.exe {0} parent {1}' -f $_.ProcessId, $_.ParentProcessId }
+          PS
           while [ $((SECONDS-start)) -lt 40 ] && { [ "$(njq)" -gt 0 ] || kill -0 "$w" 2>/dev/null; }; do sleep 1; done
           left=$(njq); echo "after $((SECONDS-start)) s: jq.exe $left · worker $(kill -0 "$w" 2>/dev/null && echo alive || echo gone) · state dir: $(ls "$T/st" | tr '\n' ' ')"
           taskkill //F //IM jq.exe >/dev/null 2>&1 || true

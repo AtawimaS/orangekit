@@ -27,12 +27,18 @@ if [ "${1:-}" = --warm-transcript ]; then
   ) &
   warm_pid=$!
   # Windows: a native launcher (Chocolatey's jq.exe shim) starts the real jq.exe outside the MSYS process group, where the group
-  # kill cannot reach it (CI run 9: one busy jq.exe survived) — so the worker's whole Windows process tree goes first.
-  # Only with a Windows pid and taskkill; a failure is ignored and the group kill runs either way
+  # kill cannot reach it (CI run 9: one busy jq.exe survived). So each other member of the worker's group has its Windows tree
+  # ended first. Not the worker itself: an MSYS exec leaves no Windows parent behind, so its tree does not reach jq, and once it
+  # is gone the supervisor cancels this timer before the group kill (CI run 10). Only with taskkill and a member's Windows pid;
+  # a failure is ignored and the group kill runs either way
   ( set +m; sleep 20
     case "${OSTYPE:-}" in msys*|cygwin*)
-      if [ -r "/proc/$warm_pid/winpid" ] && command -v taskkill >/dev/null 2>&1 && w=$(cat "/proc/$warm_pid/winpid" 2>/dev/null) && [ -n "$w" ]; then
-        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' taskkill /F /T /PID "$w" >/dev/null 2>&1 || true
+      if command -v taskkill >/dev/null 2>&1; then
+        for d in /proc/[0-9]*; do
+          [ "${d##*/}" != "$warm_pid" ] && read -r g 2>/dev/null < "$d/pgid" && [ "$g" = "$warm_pid" ] \
+            && read -r w 2>/dev/null < "$d/winpid" && [ -n "$w" ] \
+            && { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' taskkill /F /T /PID "$w" >/dev/null 2>&1 || true; }
+        done
       fi ;;
     esac
     kill -KILL -- "-$warm_pid" 2>/dev/null || true ) &
