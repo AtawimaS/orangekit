@@ -2,6 +2,16 @@
 
 <!-- orangekit-bridge-contract -->
 
+## Contents
+
+- §1 Envelope
+- §2 Messages
+- §3 Session
+- §4 Native routes
+- §5 Screens
+- §6 Native receipt
+- §7 Web hardening
+
 Only for a hybrid RN shell (`appShell` = `rn-webview` · `rn-native-screens`). The main session fills in this form in Step 3-0 as a
 **second** scratch file — never as a section of the HTTP wire contract — and pastes the full file verbatim into the frontend and the
 app generators. Step 4 compares both sides against that same file:
