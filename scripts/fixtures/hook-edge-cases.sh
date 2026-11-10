@@ -451,5 +451,118 @@ if command -v gawk >/dev/null 2>&1; then
     || nok "gawk escape warning" "$(grep -m1 'escape sequence' "$T/e")"
 else echo "skip gawk escape check — gawk not installed (Windows Git Bash and most Linux CI images have it)"; fi
 
+# ── TI · the shared transcript index (common.sh orangekit_transcript_index) is never trusted beyond the transcript ──
+# Each case is built so that trusting a stale or damaged cache gives the opposite verdict: a card read only in the appended
+# tail must count (pass), a cached Read that is no longer in the transcript must not (block). Never "allow" by mistake.
+P="$T/ti"; proj "$P"; TX="$T/ti.jsonl"; CI="$P/.st/transcript-index.ti"
+RD=$(tu Read "{\"file_path\":\"$P/.claude/rules/data.md\"}")
+tsc() { rm -f "$P/.st/knowledge-gate.ti"; sc "$P" "$(write_in ti "$TX" "$P/migrations/$1.sql" 'create table a (id int);')"; }
+committed() { awk 'NR == 1 { print $2; exit }' "$CI" 2>/dev/null; }
+size() { wc -c < "$1" | tr -d ' '; }
+want() { # $1 case  $2 expected exit (0 pass · 2 block)
+  local why=0; if [ "$2" = 2 ]; then grep -q 'Load these first' "$T/e" && why=1; else grep -q 'Load these' "$T/e" || why=1; fi
+  if [ "$SC" = "$2" ] && [ "$why" = 1 ]; then ok "TI $1"
+  else nok "TI $1" "exit $SC (want $2) · $(head -1 "$T/e")"; fi
+}
+tu Bash '{"command":"ls"}' > "$TX"
+tsc a1; want "first call builds the index (card unread → block)" 2
+[ "$(committed)" = "$(size "$TX")" ] && ok "TI the index commits the whole transcript ($(size "$TX") bytes)" || nok "TI committed offset" "$(committed) ≠ $(size "$TX")"
+printf '%s\n' "$RD" >> "$TX"
+tsc a2; want "a card Read only in the appended tail counts (pass)" 0
+[ "$(committed)" = "$(size "$TX")" ] && ok "TI the appended tail is committed" || nok "TI tail committed" "$(committed) ≠ $(size "$TX")"
+tu Bash '{"command":"pwd"}' > "$TX"   # same inode, shorter, no Read
+tsc b1; want "a shrunk transcript (same inode) is re-read — the cached Read no longer counts" 2
+{ tu Bash '{"command":"ls"}'; printf '%s\n' "$RD"; } > "$TX"; tsc b2
+# The replacement's second line has the Read line's exact length, so the cached offset still falls on a line boundary —
+# only the inode check can tell (the probe byte is a newline, the first line is the same)
+PAD=$(printf '%*s' $(( ${#RD} - $(tu Bash '{"command":""}' | wc -c) + 1 )) '' | tr ' ' x)
+{ tu Bash '{"command":"ls"}'; tu Bash "{\"command\":\"$PAD\"}"; i=0; while [ $i -lt 40 ]; do tu Bash "{\"command\":\"echo filler $i\"}"; i=$((i+1)); done; } > "$TX.new"
+mv "$TX.new" "$TX"                   # new inode, same first line, larger, no Read
+tsc b3; want "a replaced transcript (new inode, same first line, larger) is re-read" 2
+{ tu Bash '{"command":"ls"}'; printf '%s\n' "$RD"; } > "$TX"; tsc b4
+{ tu Bash '{"command":"ls"}'; tu Bash "{\"command\":\"x$PAD-rewritten-in-place\"}"; } > "$TX"   # same inode, longer, the cached offset now falls mid-line
+tsc b5; want "a transcript rewritten in place (same inode, longer) is re-read" 2
+{ tu Bash '{"command":"ls"}'; printf '%s\n' "$RD"; } > "$TX"; tsc c1
+printf '%s\n' '{"type":"system","subtype":"compact_boundary"}' >> "$TX"
+tsc c2; want "a compaction appended after the Read resets it (the Read no longer counts)" 2
+# A last line cut mid-write — inside a UTF-8 character — is in the view but never committed; completed, it counts
+LINE=$(jqb -nc --arg f "$P/.claude/rules/data.md" '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:{description:"café menu",file_path:$f}}]}}')
+CUT=$(printf '%s' "$LINE" | LC_ALL=C awk '{ print index($0, "caf") + 3 }')   # just after the first byte of é
+tu Bash '{"command":"ls"}' > "$TX"; printf '%s' "$LINE" | head -c "$CUT" >> "$TX"
+tsc d1; want "a half-written last line (cut inside é) is not read as a Read" 2
+[ "$(committed)" -le "$(( $(tu Bash '{"command":"ls"}' | wc -c) ))" ] && ok "TI the half-written line is not committed" || nok "TI partial line committed" "offset $(committed)"
+printf '%s' "$LINE" | tail -c +"$((CUT + 1))" >> "$TX"; printf '\n' >> "$TX"
+tsc d2; want "the same line, completed, counts (pass)" 0
+# The same through the cached tail: the cache covers the file, then a line cut inside é is appended — the offset must not move
+tu Bash '{"command":"ls"}' > "$TX"; tsc d3; C0=$(committed)
+printf '%s' "$LINE" | head -c "$CUT" >> "$TX"
+tsc d4; want "a half-written line in the appended tail is not read as a Read" 2
+[ "$(committed)" = "$C0" ] && ok "TI the half-written tail line is not committed (offset stays $C0)" || nok "TI partial tail committed" "offset $(committed) ≠ $C0"
+printf '%s' "$LINE" | tail -c +"$((CUT + 1))" >> "$TX"; printf '\n' >> "$TX"
+tsc d5; want "the tail line, completed, counts (pass)" 0
+# Missing and damaged caches — each one would flip the verdict if trusted; all must fall back to a full read
+{ tu Bash '{"command":"ls"}'; printf '%s\n' "$RD"; } > "$TX"; tsc e0
+rm -f "$CI"; tsc e1; want "a missing cache is rebuilt (pass)" 0
+printf 'garbage\n\001\002' > "$CI"; tsc e2; want "a garbage cache is rebuilt (pass)" 0
+tsc e3; head -c "$(( $(size "$CI") - 40 ))" "$CI" > "$CI.t"; mv "$CI.t" "$CI"
+tsc e4; want "a truncated cache (header intact, data cut) is rebuilt (pass)" 0
+awk 'NR == 1 { $2 = 999999999 } 1' "$CI" > "$CI.t"; mv "$CI.t" "$CI"
+tsc e5; want "a cache claiming more bytes than the transcript has is rebuilt (pass)" 0
+tu Bash '{"command":"ls"}' > "$TX"; tsc e6                                      # truth: card not read
+awk -v l="K	R	$P/.claude/rules/data.md	" '$0 == "P" && !d { print l; d = 1 } 1' "$CI" > "$CI.t"; mv "$CI.t" "$CI"   # a forged Read among the committed lines
+tsc e7; want "a cache padded with a forged Read is rebuilt (block — never allow)" 2
+# Concurrency: six hook calls at once on one session, with lines appended while they run — every one judges correctly,
+# the cache ends valid and no private copy is left behind
+{ tu Bash '{"command":"ls"}'; printf '%s\n' "$RD"; } > "$TX"; rm -f "$CI"
+i=0; while [ $i -lt 6 ]; do
+  ( write_in ti "$TX" "$P/migrations/p$i.sql" 'create table a (id int);' \
+    | (cd "$P" && CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$P" ORANGEKIT_STATE_DIR="$P/.st" bash "$R/scripts/security-check.sh" >/dev/null 2>&1); echo $? > "$T/pc$i" ) &
+  tu Bash "{\"command\":\"echo appended while hooks run $i\"}" >> "$TX"; i=$((i+1))
+done; wait
+codes=$(cat "$T"/pc[0-5] | tr '\n' ' ')
+[ "$codes" = "0 0 0 0 0 0 " ] && ok "TI six concurrent calls all pass (card read)" || nok "TI concurrent calls" "exit codes: $codes"
+tsc f1; want "after the concurrent calls the cache still gives the right verdict" 0
+[ "$(committed)" = "$(size "$TX")" ] && ok "TI after the concurrent calls the cache is complete" || nok "TI cache after concurrency" "$(committed) ≠ $(size "$TX")"
+ls "$P/.st" | grep -q 'transcript-index\.ti\.' && nok "TI private copies left behind" "$(ls "$P/.st" | grep 'transcript-index\.ti\.' | head -3 | tr '\n' ' ')" || ok "TI no private copy left behind"
+# build-gate reads the same index: an Edit and the test run that follows it, both only in the appended tail
+P="$T/tib"; proj "$P"; echo 'export {}' > "$P/src/a.ts"; (cd "$P" && git add -A && git -c user.email=t@x -c user.name=t commit -qm a)
+echo 'export const x = 1' > "$P/src/a.ts"; : > "$P/.st/session-baseline.txt"; TB="$T/tib.jsonl"
+tu Bash '{"command":"ls"}' > "$TB"; bg "$P" "$TB"
+tu Edit "{\"file_path\":\"$P/src/a.ts\",\"old_string\":\"{}\",\"new_string\":\"x\"}" >> "$TB"; bg "$P" "$TB"
+case "$BG" in *'"continue": false'*|*'"continue":false'*) ok "TI build-gate sees an Edit in the appended tail (blocked, no tests)" ;; *) nok "TI build-gate tail Edit" "not blocked" ;; esac
+tu Bash '{"command":"npx vitest run"}' >> "$TB"; bg "$P" "$TB"
+case "$BG" in *'"continue": false'*|*'"continue":false'*) nok "TI build-gate tail test run" "blocked although tests ran in the tail" ;; *) ok "TI build-gate sees the test run in the appended tail (no block)" ;; esac
+
+# SessionStart warms the same cache off the hook's stdout/stderr and races real gates safely.
+P="$T/tiw"; proj "$P"; TX="$T/tiw.jsonl"; CI="$P/.st/transcript-index.tiw"
+tsc() { rm -f "$P/.st/knowledge-gate.tiw"; sc "$P" "$(write_in tiw "$TX" "$P/migrations/$1.sql" 'create table a (id int);')"; }
+RD=$(tu Read "{\"file_path\":\"$P/.claude/rules/data.md\"}")
+start_warm() {
+  jqb -nc --arg tp "$TX" --arg d "$P" '{session_id:"tiw",transcript_path:$tp,cwd:$d,source:"resume"}' \
+    | CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$P" ORANGEKIT_STATE_DIR="$P/.st" bash "$R/scripts/session-brief.sh" > "$T/start-o" 2> "$T/start-e"
+}
+await_warm() { local n=0; while [ ! -f "$CI" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n+1)); done; }
+printf '%s\n' "$RD" > "$TX"
+start_warm; await_warm
+[ -f "$CI" ] && [ "$(committed)" = "$(size "$TX")" ] && ok "TI SessionStart publishes a complete warm cache" \
+  || nok "TI SessionStart warm-up" "cache missing or incomplete"
+tsc warm1; want "the first gate uses the resumed session's card Read" 0
+rm -f "$CI"; tu Bash '{"command":"ls"}' > "$TX"
+start_warm; await_warm
+[ -f "$CI" ] && ok "TI SessionStart also warms an unread-card transcript" || nok "TI unread warm-up" "no cache"
+tsc warm2; want "an unread card is still blocked after warm-up" 2
+# Enough input to overlap the detached build with gate calls; append while both can be reading.
+rm -f "$CI"
+{ printf '%s\n' "$RD"; awk 'BEGIN { for (i=0;i<20000;i++) print "{\"type\":\"user\",\"message\":\"padding padding padding padding\"}" }'; } > "$TX"
+start_warm
+i=0; while [ "$i" -lt 6 ]; do
+  ( sc "$P" "$(write_in tiw "$TX" "$P/migrations/race$i.sql" 'create table a (id int);')"; echo "$SC" > "$T/wc$i" ) &
+  tu Bash "{\"command\":\"echo warm race $i\"}" >> "$TX"; i=$((i+1))
+done; wait; await_warm
+codes=$(cat "$T"/wc[0-5] | tr '\n' ' ')
+[ "$codes" = "0 0 0 0 0 0 " ] && ok "TI SessionStart racing six gates preserves every verdict" || nok "TI warm-up race" "exit codes: $codes"
+tsc warm3; want "the cache remains correct after the warm-up race" 0
+[ "$(committed)" = "$(size "$TX")" ] && ok "TI raced cache commits all appended lines" || nok "TI warm race offset" "$(committed) != $(size "$TX")"
+
 echo "pass $pass fail $fail"
 [ "$fail" -eq 0 ]

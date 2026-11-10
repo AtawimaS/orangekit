@@ -13,21 +13,24 @@
 # `--owning <path>…` — not the hook but a lookup mode: prints, one per line, the rule cards and skills the gate would require before the first write to that path.
 # The planning stage (dev-docs-generator) uses it to fill in "Read first" for each slice — it must be the **same judgement** as the gate, so no copy is kept.
 # `--scratch-db new|url|psql|drop|list <name>` — not the hook but the **dedicated path for scratch verification DBs** (see "Scratch-DB path" below).
-case "${1:-}" in --owning|--scratch-db) INPUT='{}' ;; *) INPUT=$(cat 2>/dev/null || printf '{}') ;; esac
+# $(< …) reads stdin without a cat exec; unreadable stdin → {} as before
+case "${1:-}" in --owning|--scratch-db) INPUT='{}' ;; *) INPUT=$(< /dev/stdin) 2>/dev/null || INPUT='{}' ;; esac
 # shellcheck source=lib/common.sh
+_OK_PY_LAZY=1   # never runs Python: skip win-compat's Windows python probes on every call
 source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/lib/common.sh"
 
 # A failed root resolution must not stop the security check — only the heartbeat is best-effort
 ORANGEKIT_HOOK_NAME="security-check"
 # Through orangekit_slashes like every path from Claude Code — on Windows CLAUDE_PROJECT_DIR is C:\…, and a root left in that
 # form never prefixes a normalized C:/… file path (the knowledge gate then found no owner: fail-open)
-ORANGEKIT_ROOT=$(orangekit_slashes "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || printf '')}")
-[ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ] && orangekit_heartbeat 0
+orangekit_slashes_v ORANGEKIT_ROOT "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || printf '')}"
 
-TOOL_NAME=$(orangekit_field "$INPUT" '.tool_name')
-FILE_PATH=$(orangekit_slashes "$(orangekit_field "$INPUT" '.tool_input.file_path')")   # C:\…\a.ts → C:/…/a.ts (Windows)
-CONTENT=$(orangekit_field "$INPUT" '.tool_input.content')
-NEW_STRING=$(orangekit_field "$INPUT" '.tool_input.new_string')
+# Every field this hook reads, with one jq call (one per field used to cost a fork and an exec each, on every tool call)
+orangekit_fields "$INPUT" TOOL_NAME '.tool_name' FILE_PATH '.tool_input.file_path' CONTENT '.tool_input.content' \
+  NEW_STRING '.tool_input.new_string' F_CMD '.tool_input.command' F_TP '.transcript_path' F_SID '.session_id' F_CWD '.cwd'
+orangekit_slashes_v FILE_PATH "$FILE_PATH"   # C:\…\a.ts → C:/…/a.ts (Windows)
+# The heartbeat comes right after the field read, which also gives it its timestamp (no `date` exec)
+[ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ] && orangekit_heartbeat 0
 
 # Avoid self-reference when this hook itself is being handled (the pattern strings match themselves)
 [[ "$FILE_PATH" =~ security-check\.sh$ ]] && exit 0
@@ -71,19 +74,17 @@ _card_re() {   # $1 card → the ERE of its `paths:`. Empty string if there is n
        /^[[:space:]]*-[[:space:]]/ {sub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/["\047]/,""); print}' "$1" 2>/dev/null | _globs_ere
 }
 _session_reads() {   # $1 transcript → since the last compaction, "R<TAB>path<TAB>limit" · "B<TAB>command" · "S<TAB>skill"
-  # Line by line with `fromjson?`: one line jq cannot parse (a lone surrogate `\ud83d` from an emoji cut in half, a truncated
-  # last line) made jq exit 5, and under pipefail + the ERR trap the hook died with it — a non-blocking exit (consumer report N1)
-  jq -rR 'fromjson? | if (.type=="system" and .subtype=="compact_boundary") then "C"
-         elif .type=="assistant" then (.message.content[]? | select(.type=="tool_use")
-           | if .name=="Read" then "R\t\(.input.file_path // "")\t\(.input.limit // "")"
-             elif .name=="Bash" then "B\t\((.input.command // "") | gsub("\n";" "))"
-             elif .name=="Skill" then "S\t\(.input.skill // "")"
-             else empty end)
-         elif .type=="user" then ((.message.content // "")
-           | if type=="string" then . else ([.[]? | select(.type=="text") | .text] | join(" ")) end
-           | [scan("<command-name>/?([^<]+)</command-name>")] | .[] | "S\t\(.[0])")
-         else empty end' "$1" 2>/dev/null \
-  | awk '$0=="C" {n=0; next} {a[++n]=$0} END {for (i=1; i<=n; i++) print a[i]}'
+  # From the shared transcript index (common.sh): the K lines are what this function's own jq pass printed, line for line —
+  # including the `fromjson?` tolerance of a line jq cannot parse (a lone surrogate `\ud83d`, a truncated last line: consumer report N1).
+  # Only the appended tail of the transcript is parsed (consumer report B7 · E3: ~2 s per call on a 230 MB transcript).
+  # The old pass exited with jq's status, and this hook died with it, when the last transcript line made the program fail
+  # (an unreadable transcript: 2); that status is kept so the verdict stays the same.
+  local m c kc kv
+  orangekit_transcript_index "$1" "$F_SID" || return
+  awk 'substr($0, 1, 2) == "K\t" { l = substr($0, 3); if (l == "C") { n = 0; next } a[++n] = l }
+       END { for (i = 1; i <= n; i++) print a[i] }' "$ORANGEKIT_TI"
+  IFS=' ' read -r m c kc kv _ < "$ORANGEKIT_TI" || true
+  [ "$kv" != 1 ] || return 5
 }
 _has_test_runner() {   # routing P4's "a repo that has a test runner"
   local r="$ORANGEKIT_ROOT" t
@@ -114,9 +115,94 @@ _gate_rel() {   # $1 path (absolute or relative) $2 base directory → the proje
   case "$p" in /*|[A-Za-z]:/*) ;; *) p="${2:-$ORANGEKIT_ROOT}/${p#./}" ;; esac   # C:/… is absolute too (Windows)
   case "$p" in "$ORANGEKIT_ROOT"/*) printf '%s' "${p#"$ORANGEKIT_ROOT"/}" ;; esac
 }
+# The owner table — every card's and skill node's path ERE, built **once per hook call** by one pass over all cards and one jq
+# over the graph. It used to be re-derived per card and per skill node for every write target (~7 processes a card, ~10 a node:
+# 122 processes for one owned Write with 11 cards). The transformations are _card_re's and _globs_ere's, unchanged; the
+# table is used only for plain input (every card readable, every skill id/when/glob a one-line string, the graph a list of
+# objects). Anything else leaves _OT_STATE=slow and _owners_of takes its per-card path below — the old code, unchanged.
+_OT_STATE=""; _OT_CN=(); _OT_CR=(); _OT_SN=(); _OT_SW=(); _OT_SR=(); _OT_SU=()
+_globs_lines() {   # stdin: globs in groups, each ended by a line "\001" → one ERE per group, exactly what _globs_ere prints for it
+  sed -E -e 's/[].+^$()|\\[]/\\&/g' -e 's#\*\*/#@DS@#g' -e 's#\*\*#@DD@#g' -e 's#\*#[^/]*#g' -e 's#\?#[^/]#g' \
+         -e 's#@DS@#(.*/)?#g' -e 's#@DD@#.*#g' -e 's#\{([^}]*)\}#(\1)#g' \
+  | sed -E -e ':a' -e 's#\(([^()|\\]*),#(\1|#' -e 'ta' \
+  | awk '$0 == "\001" { print j; j = ""; f = 0; next } { j = j (f++ ? "|" : "") $0 }' \
+  | sed -E 's#^(.+)$#^(\1)$#'
+}
+_owner_table() {
+  [ -z "$_OT_STATE" ] || return 0
+  _OT_STATE=slow
+  [ -n "$ORANGEKIT_ROOT" ] || return 0
+  local c k=0 nc=0 ns=0 sk="" out line graph
+  local -a files=() lines=() sn=() sw=()
+  if [ -d "$ORANGEKIT_ROOT/.claude/rules" ]; then
+    for c in "$ORANGEKIT_ROOT"/.claude/rules/*.md; do
+      [ -f "$c" ] || continue
+      [ -r "$c" ] || return 0
+      [ -s "$c" ] && files+=("$c")   # an empty card has no `paths:` — _card_re gives "" and the card is skipped
+    done
+  fi
+  graph="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/workflow.graph.json"
+  if [ -f "$graph" ] && command -v jq >/dev/null 2>&1; then
+    sk=$(jq -r 'if (.nodes | type) != "array" or any(.nodes[]; type != "object") then "OKSLOW" else
+          . as $g | [.nodes[] | select(.kind=="skill" and .beforeWrite)] as $sk
+          | if any($sk[]; (.id | type) != "string" or .id == "" or (.id | test("[\t\n]"))
+                         or ((.beforeWrite.when // "") | type) != "string" or ((.beforeWrite.when // "") | test("[\t\n]"))) then "OKSLOW"
+            else [$sk[] | .id as $n | {n: $n, w: (.beforeWrite.when // ""),
+                   p: [$g.nodes[] | select(.id == $n) | .beforeWrite.paths[]?], u: [$g.nodes[] | select(.id == $n) | .beforeWrite.unless[]?]}] as $x
+              | if any($x[]; any((.p + .u)[]; type != "string" or test("[\n\u0000\u0001\u0002]"))) then "OKSLOW"
+                else ($x[] | "\(.n)\t\(.w)"), "\u0002", ($x[] | (.p[], "\u0001", .u[], "\u0001")) end end end' "$graph" 2>/dev/null) || return 0
+    [ "$sk" != OKSLOW ] || return 0
+    while IFS= read -r line; do
+      [ "$line" = $'\002' ] && break
+      [ -n "$line" ] || continue
+      sn[ns]=${line%%$'\t'*}; sw[ns]=${line#*$'\t'}; ns=$((ns + 1))
+    done <<< "$sk"
+    case "$sk" in *$'\002'*) sk=${sk#*$'\002'}; sk=${sk#$'\n'} ;; *) sk="" ;; esac
+  fi
+  [ ${#files[@]} -gt 0 ] || [ "$ns" -gt 0 ] || { _OT_STATE=fast; return 0; }
+  out=$({ if [ ${#files[@]} -gt 0 ]; then
+            awk 'FNR == 1 { if (NR > 1) print "\001"; d = ($0 != "---"); next }
+                 d { next }
+                 /^---[[:space:]]*$/ { d = 1; next }
+                 /^[[:space:]]*-[[:space:]]/ { sub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/["\047]/,""); print }
+                 END { if (NR > 0) print "\001" }' "${files[@]}"
+          fi
+          [ -z "$sk" ] || printf '%s\n' "$sk"; } | _globs_lines; printf '@@end\n') || return 0
+  while IFS= read -r line; do lines[k]=$line; k=$((k + 1)); done <<< "$out"
+  [ "$k" -eq $(( ${#files[@]} + 2 * ns + 1 )) ] && [ "${lines[k - 1]}" = "@@end" ] || return 0
+  k=0
+  while [ "$k" -lt ${#files[@]} ]; do
+    if [ -n "${lines[k]}" ]; then _OT_CN[nc]=${files[k]##*/}; _OT_CR[nc]=${lines[k]}; nc=$((nc + 1)); fi
+    k=$((k + 1))
+  done
+  c=0
+  while [ "$c" -lt "$ns" ]; do
+    _OT_SN[c]=${sn[c]}; _OT_SW[c]=${sw[c]}; _OT_SR[c]=${lines[k]}; _OT_SU[c]=${lines[k + 1]}
+    k=$((k + 2)); c=$((c + 1))
+  done
+  _OT_STATE=fast
+}
 _owners_of() {   # $1 project-relative path  $2 1=new file 0=existing → lines of "card<TAB>name<TAB>ERE" · "skill<TAB>name<TAB>"
   local rel="$1" isnew="$2" c re n un when
   [ -n "$rel" ] && [ -n "$ORANGEKIT_ROOT" ] || return 0
+  if [ "$_OT_STATE" = fast ]; then
+    c=0
+    while [ "$c" -lt ${#_OT_CN[@]} ]; do
+      re=${_OT_CR[c]}; [[ "$rel" =~ $re ]] && printf 'card\t%s\t%s\n' "${_OT_CN[c]}" "$re"
+      c=$((c + 1))
+    done
+    if [ "$isnew" = 1 ]; then
+      c=0
+      while [ "$c" -lt ${#_OT_SN[@]} ]; do
+        n=${_OT_SN[c]}; when=${_OT_SW[c]}; re=${_OT_SR[c]}; un=${_OT_SU[c]}; c=$((c + 1))
+        [ -n "$re" ] && [[ "$rel" =~ $re ]] || continue
+        [ -n "$un" ] && [[ "$rel" =~ $un ]] && continue
+        [ "$when" = "test-runner" ] && ! _has_test_runner && continue
+        printf 'skill\t%s\t\n' "$n"
+      done
+    fi
+    return 0
+  fi
   if [ -d "$ORANGEKIT_ROOT/.claude/rules" ]; then
     for c in "$ORANGEKIT_ROOT"/.claude/rules/*.md; do
       [ -f "$c" ] || continue
@@ -126,7 +212,7 @@ _owners_of() {   # $1 project-relative path  $2 1=new file 0=existing → lines 
   fi
   local graph="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/workflow.graph.json"
   if [ "$isnew" = 1 ] && [ -f "$graph" ] && command -v jq >/dev/null 2>&1; then
-    while IFS="$(printf '\t')" read -r n when; do
+    while IFS=$'\t' read -r n when; do
       [ -n "$n" ] || continue
       re=$(jq -r --arg n "$n" '.nodes[] | select(.id==$n) | .beforeWrite.paths[]?' "$graph" | _globs_ere)
       un=$(jq -r --arg n "$n" '.nodes[] | select(.id==$n) | .beforeWrite.unless[]?' "$graph" | _globs_ere)
@@ -138,19 +224,26 @@ _owners_of() {   # $1 project-relative path  $2 1=new file 0=existing → lines 
   fi
   return 0
 }
+# = `printf '%s' "$2" | tr -cd 'A-Za-z0-9._-'` into the variable $1 — without the fork when there is nothing to delete (a UUID)
+_clean_sid() {
+  case "$2" in
+    *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) eval "$1=\$(printf '%s' \"\$2\" | tr -cd 'A-Za-z0-9._-')" ;;
+    *) printf -v "$1" '%s' "$2" ;;
+  esac
+}
 KG_NOTES=""
 _kg_note() { KG_NOTES+="${KG_NOTES:+$'\n\n'}$1"; }   # collect, do not print one JSON per target — hook stdout must be a single JSON object
 _kg_flush() { [ -z "$KG_NOTES" ] || orangekit_emit_context PreToolUse "$KG_NOTES"; KG_NOTES=""; }
 _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → exit 2 if it blocks
   local rel="$1" isnew="$2" n re names=() kinds=() res=() unread=() again=() undec=() _k _v _l seen _ok _on _or
-  while IFS="$(printf '\t')" read -r _ok _on _or; do
+  _owner_table
+  while IFS=$'\t' read -r _ok _on _or; do
     [ -n "$_ok" ] || continue
     kinds+=("$_ok"); names+=("$_on"); res+=("$_or")
   done < <(_owners_of "$rel" "$isnew")
   [ ${#names[@]} -gt 0 ] || return 0
   local tp sid state list
-  tp=$(orangekit_field "$INPUT" '.transcript_path')
-  sid=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
+  tp=$F_TP; _clean_sid sid "$F_SID"
   # Undecidable — no transcript · no jq · or the time budget is spent (an advisory gate must not run the hook into its 15 s timeout)
   if [ -z "$tp" ] || [ ! -f "$tp" ] || ! command -v jq >/dev/null 2>&1 || [ "$SECONDS" -ge "$KG_DEADLINE" ]; then
     list=$(for i in "${!names[@]}"; do [ "${kinds[$i]}" = card ] && printf '  - Read .claude/rules/%s\n' "${names[$i]}" || printf '  - skill /%s\n' "${names[$i]}"; done)
@@ -170,7 +263,7 @@ $list"
       *"|${kinds[$i]}:$n=1|"*) continue ;;
       *"|${kinds[$i]}:$n=0|"*) ;;
       *)
-    while IFS="$(printf '\t')" read -r _k _v _l; do
+    while IFS=$'\t' read -r _k _v _l; do
       [ "$SECONDS" -lt "$KG_DEADLINE" ] || { seen=2; break; }   # budget spent mid-scan → undecidable for this item
       if [ "${kinds[$i]}" = skill ]; then
         [ "$_k" = S ] && { [ "$_v" = "$n" ] || [[ "$_v" == *:"$n" ]]; } && { seen=1; break; }
@@ -220,6 +313,7 @@ $list"
 if [ "${1:-}" = "--owning" ]; then
   shift
   [ -n "$ORANGEKIT_ROOT" ] || { printf 'cannot determine: the project root was not found\n' >&2; exit 0; }
+  _owner_table
   for _op in "$@"; do
     _orel=$(_gate_rel "$_op" "$PWD")
     [ -n "$_orel" ] || continue
@@ -232,16 +326,19 @@ fi
 # (a transcript pass), and it used to run first: a long transcript ran the hook into its 15 s timeout, or one unparseable
 # transcript line killed it, and a `DROP TABLE` or a hardcoded key in the same call was never judged (consumer report B7 · N1).
 # A blocking gate must never depend on an advisory one finishing.
-KG_SEEN="" KG_DEADLINE=$((SECONDS + $(orangekit_num "${ORANGEKIT_KG_BUDGET:-8}")))   # seconds of the 15 s hook timeout, counted from hook start; past it → undecidable notice
+KG_SEEN=""; case "${ORANGEKIT_KG_BUDGET:-8}" in ''|*[!0123456789]*) KG_DEADLINE=$((SECONDS + $(orangekit_num "${ORANGEKIT_KG_BUDGET:-8}"))) ;; *) _kgb=${ORANGEKIT_KG_BUDGET:-8}; KG_DEADLINE=$((SECONDS + ${_kgb:0:18})) ;; esac   # = orangekit_num for plain digits, without its fork   # seconds of the 15 s hook timeout, counted from hook start; past it → undecidable notice
 _kg_run() {
   if [ "$TOOL_NAME" = "Write" ] && [ -n "$FILE_PATH" ] && [ ! -e "$FILE_PATH" ]; then
     _knowledge_gate "$(_gate_rel "$FILE_PATH" "$ORANGEKIT_ROOT")" 1
     _kg_flush
   fi
+  # _bash_targets finds a target only after a `>`, `tee` or `sed` — the text it strips first always holds a `>` itself, so a
+  # command with none of the three has no target, and the ~10 processes of the extraction are skipped
+  case "$F_CMD" in *'>'*|*tee*|*sed*) ;; *) return 0 ;; esac
   if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
     local _gcwd _gcmd _gt _gabs
     # cwd in the same form as ORANGEKIT_ROOT — on Windows it arrives as C:\… and a target under it never matched the root (S1)
-    _gcwd=$(orangekit_slashes "$(orangekit_field "$INPUT" '.cwd')"); _gcmd=$(orangekit_field "$INPUT" '.tool_input.command')
+    orangekit_slashes_v _gcwd "$F_CWD"; _gcmd=$F_CMD
     while IFS= read -r _gt; do
       [ -n "$_gt" ] || continue
       _gabs=$_gt; case "$_gabs" in /*|[A-Za-z]:/*) ;; *) _gabs="${_gcwd:-$ORANGEKIT_ROOT}/${_gabs#./}" ;; esac
@@ -283,10 +380,39 @@ dblock() {   # $1 what  $2 impact  $3 safe alternative
 }
 dwarn() { printf '⚠️  %s\n     %s\n' "$1" "$2" >&2; }
 
-# First token of the command (leading environment variable assignments are skipped)
-_first_tok() {
-  printf '%s' "$1" | sed -E 's/^[[:space:]]*//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//' | awk 'NR == 1 {print $1}'
+# ── Process budget: the same verdicts with fewer forks ───────────────
+# Every Bash call runs this gate, and on Windows each fork + exec costs ~30–50 ms (CI: 2.5–3.1 s per call on Git Bash, 20× Linux).
+# The helpers below skip work only where the skipped step **provably** returns its "nothing" answer, and only for _plain text:
+# pure ASCII with no \001, at most 1 KB. Anything else takes the old path — macOS awk aborts on invalid UTF-8 (a crash the verdict
+# depends on), GNU `grep -i` folds non-ASCII letters (ſ matches s), the awk helpers split records on \001, and bash 3.2's
+# ${x//…/…} is quadratic (an 8 KB heredoc took 22 s), so a long command keeps its single awk/grep.
+_plain() { [ "${#1}" -le 1024 ] || return 1; local LC_ALL=C; case "$1" in *[![:ascii:]]*|*$'\001'*) return 1 ;; esac; return 0; }
+# = `grep <<<"$2" -Eq "$1"`; for one-line _plain text the same ERE in bash (C locale, so ranges are ASCII): one exec less
+_grepq() {
+  case "$2" in *$'\n'*) ;; *) if _plain "$2"; then local LC_ALL=C; [[ "$2" =~ $1 ]]; return; fi ;; esac
+  grep <<<"$2" -Eq "$1"
 }
+_noquotes() { local LC_ALL=C; _NQ=${1//\"/}; _NQ=${_NQ//\'/}; }   # _plain text with every " and ' removed → _NQ
+
+# First token of the command (leading environment variable assignments are skipped) → _FT_OUT, memoised on the last input
+# (three judgements per segment ask for it). For _plain text the same rule in bash: line 1, leading space stripped, then every
+# `NAME=value␠` prefix (sed's `(…=[^[:space:]]*[[:space:]]+)*` can only end at the first space after the `=`), then up to the first
+# space or tab (awk's `$1`). Other text: the original sed | awk
+_FT_IN=""; _FT_OUT=""; _FT_SET=""
+_first_tok_v() {
+  [ "$_FT_SET" = 1 ] && [ "$_FT_IN" = "$1" ] && return 0
+  local l
+  if _plain "$1"; then
+    l=${1%%$'\n'*}
+    l=${l#"${l%%[![:space:]]*}"}
+    while [[ "$l" =~ ^[[:alpha:]_][[:alnum:]_]*=[^[:space:]]*[[:space:]]+ ]]; do l=${l:${#BASH_REMATCH[0]}}; done
+    _FT_OUT=${l%%[$' \t']*}
+  else
+    _FT_OUT=$(printf '%s' "$1" | sed -E 's/^[[:space:]]*//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//' | awk 'NR == 1 {print $1}')
+  fi
+  _FT_IN=$1; _FT_SET=1
+}
+_first_tok() { _first_tok_v "$1"; printf '%s' "$_FT_OUT"; }
 
 # Is it an investigation/search command? Blocking `grep 'DROP TABLE' supabase/migrations/` is itself the false positive.
 #
@@ -295,9 +421,10 @@ _first_tok() {
 # So a read is established by the first token first, and the read verdict is reversed only when a client appears
 # **in command position after a pipe** (`cat x.sql | psql`).
 _readonly_cmd() {
-  case "$(_first_tok "$1")" in
+  _first_tok_v "$1"
+  case "$_FT_OUT" in
     grep|egrep|fgrep|rg|ag|cat|head|tail|less|more|ls|find|wc|awk|diff|jq|file|stat|which|echo|printf) ;;
-    git) grep <<<"$1" -Eq '^[[:space:]]*git[[:space:]]+(log|diff|show|grep|blame|status|branch|remote|config|rev-parse|describe|ls-files)([^a-zA-Z-]|$)' || return 1 ;;
+    git) _grepq '^[[:space:]]*git[[:space:]]+(log|diff|show|grep|blame|status|branch|remote|config|rev-parse|describe|ls-files)([^a-zA-Z-]|$)' "$1" || return 1 ;;
     *) return 1 ;;
   esac
   # Does a read command flow into a destructive executor — then it is not a read
@@ -316,12 +443,18 @@ _readonly_cmd() {
 # there is no room to confuse it with description — a bare `(`, on the other hand, is not included: prose parentheses such as
 # `git commit -m "docs: (psql) explanation"` would be mistaken for execution and become a new false positive. Narrow the hole in the exemption without adding false positives.
 _pipes_to_db_client() {
+  # Command position needs one of `$(` ` | ; & and a client name in some ASCII casing — without them the grep cannot match
+  _plain "$1" && case "$1" in *'$('*|*'`'*|*'|'*|*';'*|*'&'*) ;; *) return 1 ;; esac
+  _plain "$1" && case "$1" in *[Pp][Ss][Qq][Ll]*|*[Mm][Yy][Ss][Qq][Ll]*|*[Mm][Aa][Rr][Ii][Aa][Dd][Bb]*|*[Ss][Qq][Ll][Ii][Tt][Ee]3*|*[Mm][Oo][Nn][Gg][Oo]*|\
+                              *[Ss][Uu][Pp][Aa][Bb][Aa][Ss][Ee]*|*[Pp][Rr][Ii][Ss][Mm][Aa]*|*[Dd][Rr][Ii][Zz][Zz][Ll][Ee]-[Kk][Ii][Tt]*|\
+                              *[Aa][Ll][Ee][Mm][Bb][Ii][Cc]*|*[Ss][Qq][Ll][Cc][Mm][Dd]*) ;; *) return 1 ;; esac
   grep <<<"$1" -Eqi '(\$\(|`|[|;&])[[:space:]]*(sudo[[:space:]]+)?(npx[[:space:]]+)?(psql|mysql|mariadb|sqlite3|mongosh?|supabase|prisma|drizzle-kit|alembic|sqlcmd)([[:space:]]|$)'
 }
 
 # Does a heredoc feed a DB client — then the body is not data but **SQL that will be executed**.
 _feeds_db_client() {
-  case "$(_first_tok "$1")" in
+  _first_tok_v "$1"
+  case "$_FT_OUT" in
     psql|mysql|mariadb|sqlite3|mongo|mongosh|supabase|prisma|drizzle-kit|alembic|sqlcmd) return 0 ;;
   esac
   _pipes_to_db_client "$1"
@@ -386,8 +519,10 @@ _strip_heredoc_bodies() {
 #  In fact, while this gate was being built, the command writing its own fixture got blocked. That is why this function exists.)
 # The verdict is not made from the heredoc alone: `psql <<'SQL'` is a heredoc but it is execution.
 _authoring_cmd() {
-  case "$(_first_tok "$1")" in
-    cat|tee|printf|echo) grep <<<"$1" -Eq '(>|<<)' && return 0 ;;
+  _first_tok_v "$1"
+  case "$_FT_OUT" in
+    cat|tee|printf|echo) if _plain "$1"; then case "$1" in *'>'*|*'<<'*) return 0 ;; esac
+                         else grep <<<"$1" -Eq '(>|<<)' && return 0; fi ;;
   esac
   return 1
 }
@@ -398,8 +533,9 @@ _authoring_cmd() {
 # the user turn the hook off. The exemption is judged by **the first token** (not by string containment),
 # and it is not granted when a DB client follows a pipe.
 _message_cmd() {
-  case "$(_first_tok "$1")" in
-    git) grep <<<"$1" -Eq '^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git[[:space:]]+(commit|tag|notes|merge|revert|stash)([^a-zA-Z-]|$)' || return 1 ;;
+  _first_tok_v "$1"
+  case "$_FT_OUT" in
+    git) _grepq '^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git[[:space:]]+(commit|tag|notes|merge|revert|stash)([^a-zA-Z-]|$)' "$1" || return 1 ;;
     gh|glab) ;;
     *) return 1 ;;
   esac
@@ -411,13 +547,20 @@ _message_cmd() {
 # "DROP TABLE t"` the first half is description and the second is execution — as one string the two cannot be separated,
 # so exempting leaks the second and not exempting makes the first a false positive. Judging per segment separates them.
 # A pipe (`|`) does not split — `cat x.sql | psql` has to stay one segment for _pipes_to_db_client to see it.
-_segments() { printf '%s\n' "$1" | awk '{ gsub(/;|&&|\|\|/, "\n"); print }'; }
+_segments_v() { local LC_ALL=C t=${1//;/$'\n'}; t=${t//&&/$'\n'}; _SEGS=${t//||/$'\n'}; }   # _plain text → _SEGS (printf '%s\n' of it = _segments)
+_segments() {
+  # _plain text: the same three replacements in bash (the separators share no character, so one after another = awk's single gsub)
+  if _plain "$1"; then _segments_v "$1"; printf '%s\n' "$_SEGS"; return 0; fi
+  printf '%s\n' "$1" | awk '{ gsub(/;|&&|\|\|/, "\n"); print }'
+}
 
 # Is it a **single command that runs** this hook or doctor? Used only for the self-reference exemption of the secret scan.
 # It used to exempt on containment of the string `*doctor.sh*`, which skipped the whole destruction gate —
 # `bash scripts/doctor.sh --help; psql -c "DROP TABLE users"` was exit 0 (evaluation v6 · E-21).
 # The exemption is judged by the first token, and is not granted when another command follows (`;` `&&` `||` `&`).
 _self_ref_cmd() {
+  # Both tokens it compares are substrings of the command — without either file name in it, the answer is no
+  case "$1" in *doctor.sh*|*security-check.sh*) ;; *) _plain "$1" && return 1 ;; esac
   grep <<<"$1" -Eq '(;|&&|\|\||&[[:space:]]|&$)' && return 1
   local t1 t2
   t1=$(_first_tok "$1")
@@ -435,6 +578,8 @@ _self_ref_cmd() {
 # an arrow (`->`) and a comparison (`>=`) are not writes.
 _writes_file() {
   local c
+  # Both greps need `tee`, `dd` or a `>`; the sed only removes text that holds a `>` — without the three, no write
+  _plain "$1" && case "$1" in *'>'*|*tee*|*dd*) ;; *) return 1 ;; esac
   c=$(printf '%s' "$1" | sed -E 's/[0-9]*>{1,2}[[:space:]]*\/dev\/null//g; s/&>[[:space:]]*\/dev\/null//g; s/[0-9]*>&[0-9]+//g')
   grep <<<"$c" -Eq '(^|[^0-9A-Za-z_])(tee|dd)([^0-9A-Za-z_]|$)' && return 0
   grep <<<"$c" -Eq '(^|[^-<>=])>{1,2}[[:space:]]*[^=&[:space:]]' && return 0
@@ -823,6 +968,8 @@ _db_creates_via_fns() (   # $1 executable segment → names created by calling a
   done <<< "$fns"
 )
 _record_db_creator_fns() {   # $1 raw text
+  # Both finders match only a `name() {…}` definition — without a `()` there is nothing to record
+  _plain "$1" && case "$1" in *'()'*) ;; *) return 0 ;; esac
   local f n; f=$(_created_db_fns_file) || return 0
   n=$(_db_creator_fns_in "$1")
   [ -n "$n" ] && { mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$n" >> "$f" 2>/dev/null || true; }
@@ -845,7 +992,7 @@ _url_fns_in() (   # $1 raw text → names of the functions that replace only the
       if (d !~ /DATABASE_URL/ || d !~ /\$\{?1/) continue
       n = d; sub(/^function[ \t]+/, "", n); sub(/[ \t]*\(\).*$/, "", n)
       b = d; sub(/^[^{]*\{/, "", b); sub(/\}$/, "", b); gsub(/\n/, " ", b)
-      printf "%s\t%s\n", n, b } }' | while IFS="$(printf '\t')" read -r nm body; do
+      printf "%s\t%s\n", n, b } }' | while IFS=$'\t' read -r nm body; do
     body=$(printf '%s' "$body" | sed 's/\${1}/zzorangekitprobe/g; s/\$1/zzorangekitprobe/g; s/;[[:space:]]*$//')
     [ "$(_url_db_name "$body")" = zzorangekitprobe ] && printf '%s\n' "$nm"
   done
@@ -908,7 +1055,7 @@ _sed_base_of() (   # $1 assignment value → X when it strips only the last path
 _conn_update() (   # $1 assignment lines (VAR<TAB>value)  $2 the map so far ("VAR=db" · "VAR=@@base@@") → the new map. An assignment that does not resolve removes that variable
   trap - ERR; set +e
   local map="$2" var val db b
-  while IFS="$(printf '\t')" read -r var val; do
+  while IFS=$'\t' read -r var val; do
     [ -n "$var" ] || continue
     map=$(printf '%s\n' "$map" | awk -F= -v k="$var" '$1!=k')
     if grep <<<"$val" -Eq '^"?\$\{?DATABASE_URL\}?"?$'; then map="$map
@@ -945,6 +1092,8 @@ _scratch_url() {   # $1 DB name → DATABASE_URL with only the DB name replaced 
 }
 _scratch_cmd() {   # $1 segment → is it a segment that runs this mode? (judged by the first token)
   local t1 rest
+  # t1 is a piece of the segment with its quotes removed, so without this file's path in the quote-stripped segment it cannot match
+  _plain "$1" && { _noquotes "$1"; case "$_NQ" in *"$_SCRATCH_SELF"*) ;; *) return 1 ;; esac; }
   t1=$(_first_tok "$1")
   rest=$(printf '%s' "$1" | sed -E 's/^[[:space:]]*//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//')
   case "$t1" in bash|sh) rest=${rest#* }; t1=$(_first_tok "$rest") ;; esac
@@ -1331,18 +1480,55 @@ _simple_cmds() (   # $1 command  $2 directory relative script paths resolve agai
     }
     { parse($0, 0, 0) } END { print "@@ok" }'
 )
+# Can the tokenizer's output change a verdict? It is read for three things only: git/rm lines (GITX · the push checks), DB-client
+# lines reached through a wrapper (SQLX), and its end marker. It reads a file only for a shell, `source`/`.`, a command word with a
+# `/`, an input redirect, xargs, or `$VAR`/`$( )`/backticks as a command. So for _plain text with none of those characters, none
+# of those words and no git/rm/client name in any casing — checked with quotes removed, since the tokenizer joins quoted pieces,
+# and with no backslash, which it also removes — every line it can print is some other command, and it prints "@@ok".
+_sc_cannot_matter() {
+  _plain "$1" || return 1
+  case "$1" in *[/\\\<\`\$=]*|*for*|*'()'*) return 1 ;; esac
+  _noquotes "$1"
+  case "$_NQ" in
+    .|.[[:space:]]*|*[[:space:]\;\&\|\(].|*[[:space:]\;\&\|\(].[[:space:]\;\&\|\(\)]*|.[\;\&\|\(\)]*) return 1 ;;
+    *[Ss][Hh]*|*[Ss][Oo][Uu][Rr][Cc][Ee]*|*[Xx][Aa][Rr][Gg][Ss]*|*[Ee][Vv][Aa][Ll]*|*[Ee][Nn][Vv]*|*[Gg][Ii][Tt]*|*[Rr][Mm]*) return 1 ;;
+    *[Pp][Ss][Qq][Ll]*|*[Mm][Yy][Ss][Qq][Ll]*|*[Mm][Aa][Rr][Ii][Aa][Dd][Bb]*|*[Ss][Qq][Ll][Ii][Tt][Ee]*|*[Mm][Oo][Nn][Gg][Oo]*) return 1 ;;
+    *[Ss][Qq][Ll][Cc][Mm][Dd]*|*[Ss][Uu][Pp][Aa][Bb][Aa][Ss][Ee]*|*[Pp][Rr][Ii][Ss][Mm][Aa]*|*[Dd][Rr][Ii][Zz][Zz][Ll][Ee]*|*[Aa][Ll][Ee][Mm][Bb][Ii][Cc]*) return 1 ;;
+  esac
+  return 0
+}
 destructive_gate() {
   # Judged after stripping the heredoc body (= data). The secret check **does not strip** —
   # the axis is the opposite: writing a secret is itself the exposure, so the body is exactly what is judged.
   _record_db_creator_fns "$1"
-  local DCMD; DCMD=$(_expand_shell_literals "$(_inline_listed_files "$(_unwrap_shell_c "$(_strip_heredoc_bodies "$1")")")")
+  local DCMD _xin="" _xout=""
+  if _plain "$1"; then
+    # The same four passes, each run only when its input holds what it rewrites (a heredoc `<<` · a `<shell> -c '…'` · a `for` ·
+    # an assignment, loop or function) — otherwise it would print its input unchanged. A skipped `$( )` still drops trailing newlines
+    DCMD=$1
+    case "$DCMD" in *'<<'*) DCMD=$(_strip_heredoc_bodies "$DCMD") || true ;; esac
+    while [[ "$DCMD" == *$'\n' ]]; do DCMD=${DCMD%$'\n'}; done
+    case "$DCMD" in *sh*-*c*[\"\']*) DCMD=$(_unwrap_shell_c "$DCMD") || true ;; esac
+    case "$DCMD" in *for*) DCMD=$(_inline_listed_files "$DCMD") || true ;; esac
+    if ! _plain "$DCMD"; then _xin=$DCMD; DCMD=$(_expand_shell_literals "$DCMD"); _xout=$DCMD
+    else case "$DCMD" in *=*|*for*|*'()'*) _xin=$DCMD; DCMD=$(_expand_shell_literals "$DCMD"); _xout=$DCMD ;; esac; fi
+  else
+    DCMD=$(_expand_shell_literals "$(_inline_listed_files "$(_unwrap_shell_c "$(_strip_heredoc_bodies "$1")")")")
+  fi
   _GATE_CMD="$DCMD"
   # What runs, one simple command per line (see _simple_cmds). The literal expansion runs on the raw command — the tokenizer needs the
   # heredoc bodies (a script written with `cat > p.sh <<EOF` · `bash <<EOF`). $PWD = the session cwd the hook runs in (also what `git rev-parse` below reads)
   local SC SQLX="" GITX="" _l
   local -a _w
   # The literal expansion only changes text with an assignment, a loop or a function — skipped otherwise (one awk less on most commands)
-  case "$1" in *=*|*for*|*'()'*) SC=$(_simple_cmds "$(_expand_shell_literals "$1")" "$PWD") || SC="" ;; *) SC=$(_simple_cmds "$1" "$PWD") || SC="" ;; esac   # a failed pass is caught below, not by the ERR trap (whose exit code would be awk's)
+  # The literal expansion of the raw command was often just computed for DCMD from the very same text — then it is reused
+  # (CI run 7: the tokenizer commit made every Bash call ~20% slower on Windows, two awk passes over one string among it)
+  if _sc_cannot_matter "$1"; then SC="@@ok"
+  else case "$1" in
+    *=*|*for*|*'()'*) if [ -n "$_xin" ] && [ "$_xin" = "$1" ]; then SC=$(_simple_cmds "$_xout" "$PWD") || SC=""
+                      else SC=$(_simple_cmds "$(_expand_shell_literals "$1")" "$PWD") || SC=""; fi ;;
+    *) SC=$(_simple_cmds "$1" "$PWD") || SC="" ;;
+  esac; fi   # a failed pass is caught below, not by the ERR trap (whose exit code would be awk's)
   # Never fail open: without the end marker the pass died part-way and anything after that point was not seen.
   # Not a dblock title — it is a hook failure, not a pattern, so it stays out of the block-reason count the manual quotes
   if [ "${SC##*$'\n'}" != "@@ok" ] && [ "$SC" != "@@ok" ]; then
@@ -1358,14 +1544,19 @@ destructive_gate() {
       psql|mysql|mariadb|sqlite3|mongo|mongosh|sqlcmd|supabase|prisma|drizzle-kit|alembic) [ "${_w[0]}" = 1 ] && SQLX+="$_l"$'\n' ;;
     esac
   done <<< "$SC"
-  local target="" _D
+  local target="" _D _DP=0
   dhas() { grep <<<"$_D" -Eqi -e "$1"; }
+  # A necessary keyword of the next dhas pattern (a glob, letters in both cases). For _plain text a case-insensitive grep can only
+  # match where the keyword stands in some ASCII casing, so its absence answers "no" without the grep. Other text: always "maybe"
+  _dk() { [ "$_DP" = 1 ] || return 0; local k; for k in "$@"; do case "$_D" in $k) return 0 ;; esac; done; return 1; }
 
   # ── Data destruction (SQL · migration tools) — judged per segment ───
   # A segment that is neither an investigation command, an authoring command, nor a message command = something meant to run
-  local seg created_here=""
+  local seg created_here="" _i _a _b _pn _none="" _fns=0
+  local -a _segs=() _ex=()
   _exec_seg() {
-    [ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ] && return 1
+    # A letter or digit is never [:space:] — only a segment without one needs the tr
+    case "$1" in *[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) ;; *) [ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ] && return 1 ;; esac
     _readonly_cmd "$1" && return 1
     _authoring_cmd "$1" && return 1
     _message_cmd "$1" && return 1
@@ -1373,28 +1564,57 @@ destructive_gate() {
   }
   # The DBs the same command creates — gathered only from executing segments. A `CREATE DATABASE` string written to a file is not
   # a creation. Gathered first so that it is visible even when the DROP is in an earlier segment than the CREATE (`DROP … && CREATE …`)
-  while IFS= read -r seg; do
+  # Both loops below read the same segment list — it is read once, and whether a segment executes is judged once
+  if [ -z "$SQLX" ] && _plain "$DCMD"; then   # the same lines _segments prints, read without the process substitution's fork
+    _segments_v "$DCMD"; while IFS= read -r seg; do _segs+=("$seg"); done <<< "$_SEGS"
+  else while IFS= read -r seg; do _segs+=("$seg"); done < <(_segments "$DCMD"; printf '%s' "$SQLX"); fi
+  # _db_creates_via_fns has nothing to find unless a creator function was recorded (this call may just have recorded one, above)
+  [ -n "${ORANGEKIT_ROOT:-}" ] && [ -f "${ORANGEKIT_STATE_DIR:-${ORANGEKIT_ROOT:-.}/.claude/.orangekit}/created-db-fns" ] && _fns=1   # = _created_db_fns_file
+  _i=0
+  while [ "$_i" -lt ${#_segs[@]} ]; do
+    seg=${_segs[_i]}; _ex[_i]=0; _i=$((_i + 1))
     _exec_seg "$seg" || continue
-    created_here="$created_here$(_db_targets "$seg" create)
-$(_db_creates_via_fns "$seg")
+    _ex[_i - 1]=1
+    # `create … database` is matched on the lowercased text with backslashes removed — no "create" in any casing, nothing to find
+    _a=""; _b=""
+    if _plain "$seg"; then case "$seg" in *[Cc]*[Rr]*[Ee]*[Aa]*[Tt]*[Ee]*) _a=$(_db_targets "$seg" create) || true ;; esac
+    else _a=$(_db_targets "$seg" create) || true; fi
+    [ "$_fns" = 0 ] || _b=$(_db_creates_via_fns "$seg")
+    created_here="$created_here$_a
+$_b
 "
-  done < <(_segments "$DCMD"; printf '%s' "$SQLX")
+  done
   # Connection map — in segment order. A standalone assignment (`S=…` · `export DATABASE_URL=…`) carries forward, while an assignment before a command (`DATABASE_URL=… npm …`) applies to that command only
   local cmap="" segmap scratch_seg hd_delim="" a_lines
-  while IFS= read -r seg; do
+  _i=0
+  while [ "$_i" -lt ${#_segs[@]} ]; do
+    seg=${_segs[_i]}; _i=$((_i + 1))
     if [ -n "$hd_delim" ]; then   # a heredoc body going into a scratch-DB psql — it runs only inside that scratch DB
       [ "$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')" = "$hd_delim" ] && hd_delim=""
       continue
     fi
-    a_lines=$(_assigns_of "$seg")
-    segmap=$(_conn_update "$a_lines" "$cmap")
+    # An assignment needs a `=`; with none, _conn_update would print the map back unchanged
+    if _plain "$seg"; then case "$seg" in *=*) a_lines=$(_assigns_of "$seg") ;; *) a_lines="" ;; esac
+    else a_lines=$(_assigns_of "$seg"); fi
+    if [ -n "$a_lines" ]; then segmap=$(_conn_update "$a_lines" "$cmap"); else segmap=$cmap; fi
     if [ -n "$a_lines" ] && [ -z "$(printf '%s' "$seg" | sed -E 's/^[[:space:]]*((export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|\$\([^)]*\)|[^[:space:];&|]+)[[:space:]]*)+//' | tr -d '[:space:]')" ]; then
       cmap="$segmap"
     fi
-    _exec_seg "$seg" || continue
-    _D="$seg"
+    [ "${_ex[_i - 1]}" = 1 ] || continue
+    _D="$seg"; _DP=0; _plain "$seg" && _DP=1
     scratch_seg=0
-    if _scratch_cmd "$seg" || _scratch_db_ok "$(_psql_conn_db "$seg" "$segmap" || printf '@@none@@')" "$created_here"; then
+    # _psql_conn_db answers "@@none@@" at once without a psql in the segment; that answer's proof depends only on this call's
+    # state (created_here is complete, the records are written at the end), so it is computed once, not per segment
+    case "$seg" in *psql*) _pn=$(_psql_conn_db "$seg" "$segmap" || printf '@@none@@') ;; *) _pn=@@none@@ ;; esac
+    if [ "$_pn" = @@none@@ ] && [ -z "$_none" ]; then
+      # "@@none@@" can only be proven a scratch DB by a record holding "@@" (an exact line, or a name with a per-run piece) —
+      # none in this command and no record file means no; the steps it skips only read (and in this `if` cannot fail the hook)
+      _none=1
+      case "$created_here" in *@@*) _none="" ;; esac
+      [ -n "${ORANGEKIT_ROOT:-}" ] && [ -f "${ORANGEKIT_STATE_DIR:-${ORANGEKIT_ROOT:-.}/.claude/.orangekit}/created-dbs" ] && _none=""
+      if [ -z "$_none" ]; then if _scratch_db_ok "@@none@@" "$created_here"; then _none=0; else _none=1; fi; fi
+    fi
+    if _scratch_cmd "$seg" || { [ "$_pn" = @@none@@ ] && [ "$_none" = 0 ]; } || { [ "$_pn" != @@none@@ ] && _scratch_db_ok "$_pn" "$created_here"; }; then
       scratch_seg=1
       if grep <<<"$seg" -Eq '<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*'; then
         hd_delim=$(grep <<<"$seg" -oE '<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*' | head -1 | sed -E "s/^<<-?[[:space:]]*['\"]?//")
@@ -1408,50 +1628,51 @@ $(_db_creates_via_fns "$seg")
       continue
     fi
 
-    dhas '(^|[^a-z_])drop[[:space:]]+(table|database|schema)([^a-z_]|$)' \
+    _dk '*[Dd][Rr][Oo][Pp]*' && dhas '(^|[^a-z_])drop[[:space:]]+(table|database|schema)([^a-z_]|$)' \
       && ! _drop_exempt "$seg" "$created_here" \
       && dblock "DROP of a table/database/schema via DDL" \
                 "That object and every row inside it disappears. Without a backup there is no recovery" \
                 "Take a backup first (pg_dump or similar), run it inside a transaction, check the result, then commit. $_SCRATCH_HINT. The project DB (the connection URL in environment variables · .env*) and system DBs are still blocked"
 
     # coreutils `truncate -s 0 file` carries a dash, so it does not match
-    dhas '(^|[^a-z_])truncate[[:space:]]+(table[[:space:]]+)?["a-z_]' \
+    _dk '*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]*' && dhas '(^|[^a-z_])truncate[[:space:]]+(table[[:space:]]+)?["a-z_]' \
       && dblock "TRUNCATE — emptying an entire table" \
                 "Every row is deleted and a rollback or recovery is usually impossible (triggers are skipped too)" \
                 "Narrow the range with DELETE ... WHERE, or run it after a backup. $_SCRATCH_HINT"
 
     # DELETE without WHERE — only when the table name is followed directly by `;` or the end (no match when WHERE is present)
-    dhas '(^|[^a-z_])delete[[:space:]]+from[[:space:]]+["a-z_][a-z0-9_."]*[[:space:]]*(;|$)' \
+    _dk '*[Dd][Ee][Ll][Ee][Tt][Ee]*' && dhas '(^|[^a-z_])delete[[:space:]]+from[[:space:]]+["a-z_][a-z0-9_."]*[[:space:]]*(;|$)' \
       && dblock "DELETE FROM without WHERE" \
                 "Every row in the target table is deleted" \
                 "Narrow the range with a WHERE clause, and first check the number of affected rows with SELECT COUNT(*) on the same condition. $_SCRATCH_HINT"
 
-    dhas 'supabase[[:space:]]+db[[:space:]]+reset' \
+    _dk '*[Ss][Uu][Pp][Aa][Bb][Aa][Ss][Ee]*' && dhas 'supabase[[:space:]]+db[[:space:]]+reset' \
       && dblock "supabase db reset — resetting the local DB" \
                 "Schema and data are all deleted and migrations are reapplied from scratch. Data outside the seed disappears" \
                 "To revert only one specific migration, write a new revert migration instead"
 
-    dhas 'prisma[[:space:]]+migrate[[:space:]]+reset|prisma[[:space:]]+db[[:space:]]+push[^|;&]*--force-reset' \
+    _dk '*[Pp][Rr][Ii][Ss][Mm][Aa]*' && dhas 'prisma[[:space:]]+migrate[[:space:]]+reset|prisma[[:space:]]+db[[:space:]]+push[^|;&]*--force-reset' \
       && dblock "prisma schema reset" \
                 "Drops the database and recreates it. All existing data disappears" \
                 "Create an incremental migration with prisma migrate dev"
 
-    dhas 'alembic[[:space:]]+downgrade[[:space:]]+base|drizzle-kit[[:space:]]+drop' \
+    _dk '*[Aa][Ll][Ee][Mm][Bb][Ii][Cc]*' '*[Dd][Rr][Ii][Zz][Zz][Ll][Ee]-[Kk][Ii][Tt]*' && dhas 'alembic[[:space:]]+downgrade[[:space:]]+base|drizzle-kit[[:space:]]+drop' \
       && dblock "reverting every migration" \
                 "Every migration is un-applied and the schema and data disappear" \
                 "Specify a single revision to revert to (alembic downgrade -1)"
 
     # An UPDATE without WHERE can be reverted, but it silently changes every row — warning
-    dhas '(^|[^a-z_])update[[:space:]]+["a-z_][a-z0-9_."]*[[:space:]]+set[^;]*(;|$)' \
+    _dk '*[Uu][Pp][Dd][Aa][Tt][Ee]*' && dhas '(^|[^a-z_])update[[:space:]]+["a-z_][a-z0-9_."]*[[:space:]]+set[^;]*(;|$)' \
       && ! dhas '(^|[^a-z_])where([^a-z_]|$)' \
       && dwarn "UPDATE without WHERE — every row in the table changes" "Check that the range is narrowed with a WHERE clause"
-  done < <(_segments "$DCMD"; printf '%s' "$SQLX")   # + SQL that reaches a client only through a wrapper · xargs · a script (mark 1)
+  done   # segments: _segments "$DCMD" + SQLX, the SQL that reaches a client only through a wrapper · xargs · a script (mark 1)
 
   # Below looks at the whole command — a git command completes within a segment and this vocabulary never turns up in a descriptive argument
   _D="$DCMD"$'\n'"$GITX"   # + git/rm as they run: global options stripped, eval · xargs · alias · script bodies resolved
+  _DP=0; _plain "$_D" && _DP=1
 
   # ── git history destruction ─────────────────────────────────────────
-  dhas 'git[[:space:]]+filter-branch|git[[:space:]]+filter-repo|git[[:space:]]+push[^|;&]*--mirror' \
+  _dk '*[Ff][Ii][Ll][Tt][Ee][Rr]-*' '*--[Mm][Ii][Rr][Rr][Oo][Rr]*' && dhas 'git[[:space:]]+filter-branch|git[[:space:]]+filter-repo|git[[:space:]]+push[^|;&]*--mirror' \
     && dblock "git history rewrite / mirror push" \
               "Every commit hash changes and everyone else's clone goes out of sync. Remote history cannot be undone" \
               "If a rewrite is truly necessary, announce it to the team first, leave a backup branch and tag, then proceed"
@@ -1527,11 +1748,14 @@ $(_db_creates_via_fns "$seg")
   # Only Linux procps pkill and pgrep kill their own shell — the BSD/macOS versions exclude their own ancestor processes by default (measured: macOS survives and
   # a procps-ng 4.0.2 container gets exit 143). It does not happen anywhere else, so it is not blocked
   local kp kflat kprocps=0 ksid kbin=""
+  # _self_kill_patterns only reports a word that is `pkill` or `pgrep` once quotes are removed — none, nothing to judge
+  _plain "$DCMD" && { _noquotes "$DCMD"; case "$_NQ" in *pkill*|*pgrep*) ;; *) kprocps=skip ;; esac; }
+  [ "$kprocps" = skip ] || {
   { pkill --version 2>&1 || true; } | grep -q procps && kprocps=1
   # If session start put the ancestor-excluding wrappers at the front of **this session's** PATH (per-session marker) and those wrappers
   # still exist, the shell does not die — do not guess and block. Other sessions' markers are not read (parallel sessions), and a marker
   # whose wrappers are gone (plugin update mid-session) falls back to the text check
-  ksid=$(orangekit_field "$INPUT" '.session_id' | tr -cd 'A-Za-z0-9._-')
+  _clean_sid ksid "$F_SID"
   [ -n "$ksid" ] && kbin=$(head -1 "$(orangekit_state_dir)/proc-shim/$ksid" 2>/dev/null || true)
   [ -n "$kbin" ] && [ -x "$kbin/pkill" ] && [ -x "$kbin/pgrep" ] && kprocps=0
   kflat=$(printf '%s' "$1" | tr '\n' ' ')   # A shell command line is one string — aligned with grep's line-by-line judgement
@@ -1545,19 +1769,20 @@ $(_db_creates_via_fns "$seg")
       exit 2
     fi
   done < <(_self_kill_patterns "$DCMD"); fi
+  }
 
   # ── Recoverable, but silently lost — warning only ───────────────────
-  if dhas '(^|[^a-z_])rm[[:space:]]+(-[a-zA-Z]*[rR][a-zA-Z]*[[:space:]]+)*-?[a-zA-Z]*[fF]' \
+  if _dk '*[Rr][Mm]*' && dhas '(^|[^a-z_])rm[[:space:]]+(-[a-zA-Z]*[rR][a-zA-Z]*[[:space:]]+)*-?[a-zA-Z]*[fF]' \
      && ! dhas '(node_modules|/dist|/build|\.next|\.turbo|\.cache|/tmp/|coverage)'; then
     dwarn "rm -rf — deleted files do not go through the trash" "Check the target path again. If the file is tracked, first see whether git can bring it back"
   fi
-  dhas 'git[[:space:]]+reset[^|;&]*--hard' \
+  _dk '*[Rr][Ee][Ss][Ee][Tt]*' && dhas 'git[[:space:]]+reset[^|;&]*--hard' \
     && dwarn "git reset --hard — uncommitted changes disappear" "Keep them first with git stash or git diff > patch"
-  dhas 'git[[:space:]]+clean[^|;&]*-[a-z]*[fd]' \
+  _dk '*[Cc][Ll][Ee][Aa][Nn]*' && dhas 'git[[:space:]]+clean[^|;&]*-[a-z]*[fd]' \
     && dwarn "git clean — untracked files are deleted" "Check the targets first with git clean -n"
 
   # Record the DBs created by a command that passed this gate — a later cleanup (`DROP DATABASE`) proves ② with them
-  _record_created_dbs "$(grep <<<"$created_here" -v '^$' || true)"
+  case "$created_here" in *[!$'\n']*) _record_created_dbs "$(grep <<<"$created_here" -v '^$' || true)" ;; esac   # only newlines: nothing to record
   return 0
 }
 
@@ -1574,7 +1799,7 @@ case "$TOOL_NAME" in
     TEXT="${CONTENT}${NEW_STRING}"
     ;;
   Bash)
-    CMD=$(orangekit_field "$INPUT" '.tool_input.command')
+    CMD=$F_CMD
     # A destructive command is irreversible **even when it writes no file**. It is looked at before the write filter below,
     # and **no command is exempt** — while the self-reference exemption still reached this far,
     # `…doctor.sh…; psql -c "DROP TABLE"` passed through whole (evaluation v6 · E-21).
@@ -1612,6 +1837,14 @@ warn() { printf '⚠️  %s\n%s\n' "$1" "$2" >&2; }
 # through (consumer report). Every `grep <<<"$x"` in this file is there for the same reason.
 has()  { grep <<<"$TEXT" -Eq  -e "$1"; }
 hasi() { grep <<<"$TEXT" -Eqi -e "$1"; }
+# One grep for the literal every secret pattern below must contain (AKIA · gh?_ · sk_ (also in _sk_) · sk- · AIza · sb_secret_ ·
+# the JWT header · -----BEGIN · "service_account" · dangerouslySetInnerHTML · kakao). It runs case-insensitively — a superset of
+# each case-sensitive pattern's literal, and the same matching as the KakaoPay `hasi` — so on a miss every `hass`/`hassi` is false
+# without its own grep (each one re-wrote the whole text to a here-string temp file: 17 × 300 KB for one large Write).
+# The negative zod check keeps its own grep
+_SEC_ANY=1
+hass() { [ "$_SEC_ANY" = 1 ] && has "$1"; }
+hassi() { [ "$_SEC_ANY" = 1 ] && hasi "$1"; }
 
 # ── .env exemption — only when proven ─────────────────────────────────
 #
@@ -1636,7 +1869,9 @@ hasi() { grep <<<"$TEXT" -Eqi -e "$1"; }
 # (destructive_gate carries the same limit — see the "destructive statement inside a file" comment above.)
 case "$TOOL_NAME" in
   Edit|Write|MultiEdit)
-    if [[ "$(basename -- "$FILE_PATH")" =~ ^\.env(\..+)?$ ]]; then
+    # ${FILE_PATH##*/} is basename's answer unless the path ends in "/" (basename strips that first) — only then the fork
+    case "$FILE_PATH" in */) _base=$(basename -- "$FILE_PATH") ;; *) _base=${FILE_PATH##*/} ;; esac
+    if [[ "$_base" =~ ^\.env(\..+)?$ ]]; then
       if ( cd "$(dirname -- "$FILE_PATH")" 2>/dev/null \
            && git check-ignore -q -- "$(basename -- "$FILE_PATH")" 2>/dev/null ); then
         printf '🔐 Writing a secret to %s — the file is ignored by .gitignore, so it will not be committed.\n' "$FILE_PATH" >&2
@@ -1650,41 +1885,42 @@ case "$TOOL_NAME" in
 esac
 
 # ── Blocked: obvious secrets ──────────────────────────────────────────
+grep <<<"$TEXT" -Eqi -e 'AKIA|gh[pousr]_|sk_|sk-|AIza|sb_secret_|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9|-----BEGIN|"service_account"|dangerouslySetInnerHTML|kakao' || _SEC_ANY=0
 
-has 'AKIA[0-9A-Z]{16}' \
+hass 'AKIA[0-9A-Z]{16}' \
   && block "hardcoded AWS Access Key ID" "pattern: AKIA + 16 uppercase letters/digits"
 
-has 'ghp_[a-zA-Z0-9]{36}' \
+hass 'ghp_[a-zA-Z0-9]{36}' \
   && block "hardcoded GitHub Personal Access Token" "pattern: ghp_ + 36 characters"
 
-has 'gh[pousr]_[A-Za-z0-9]{36,}' \
+hass 'gh[pousr]_[A-Za-z0-9]{36,}' \
   && block "hardcoded GitHub token" "pattern: gho_/ghu_/ghs_/ghr_"
 
-has 'sk_(live|test)_[a-zA-Z0-9]{24,}' \
+hass 'sk_(live|test)_[a-zA-Z0-9]{24,}' \
   && block "hardcoded Stripe Secret Key" "pattern: sk_live_ or sk_test_"
 
-has '(test|live)_sk_[a-zA-Z0-9]{20,}' \
+hass '(test|live)_sk_[a-zA-Z0-9]{20,}' \
   && block "hardcoded TossPayments Secret Key" "pattern: test_sk_ or live_sk_"
 
 # KakaoPay — a secret named in the rules that was missing from the v2 check
-hasi 'kakao.{0,20}(secret_?key|admin_?key)[[:space:]]*[:=][[:space:]]*['"'"'"][^'"'"'"]{16,}' \
+hassi 'kakao.{0,20}(secret_?key|admin_?key)[[:space:]]*[:=][[:space:]]*['"'"'"][^'"'"'"]{16,}' \
   && block "hardcoded KakaoPay secret" "secretKey/adminKey belong in server environment variables only"
 
-has 'sk-proj-[a-zA-Z0-9_-]{20,}' \
+hass 'sk-proj-[a-zA-Z0-9_-]{20,}' \
   && block "hardcoded OpenAI API Key" "pattern: sk-proj-"
 
-has 'sk-ant-[a-zA-Z0-9_-]{20,}' \
+hass 'sk-ant-[a-zA-Z0-9_-]{20,}' \
   && block "hardcoded Anthropic API Key" "pattern: sk-ant-"
 
-has 'AIza[0-9A-Za-z_-]{35}' \
+hass 'AIza[0-9A-Za-z_-]{35}' \
   && block "hardcoded Google API Key" "pattern: AIza + 35 characters"
 
 # Supabase new key scheme (sb_secret_ / sb_publishable_)
-has 'sb_secret_[a-zA-Z0-9_-]{20,}' \
+hass 'sb_secret_[a-zA-Z0-9_-]{20,}' \
   && block "hardcoded Supabase Secret Key" "sb_secret_ keys are server-only. Never expose one to the client"
 
 # Supabase legacy JWT key
-if has 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[a-zA-Z0-9_-]{40,}\.[a-zA-Z0-9_-]+'; then
+if hass 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[a-zA-Z0-9_-]{40,}\.[a-zA-Z0-9_-]+'; then
   if hasi 'service_?role'; then
     block "hardcoded Supabase Service Role Key" "service_role bypasses RLS. Never expose it to the client"
   elif ! hasi 'anon|publishable'; then
@@ -1696,15 +1932,15 @@ fi
 
 # has() already uses grep -e, so the call site must not add '--'.
 # Adding it makes '--' the pattern argument and falsely blocks all code containing '--' (i--, count--).
-has '-----BEGIN[[:space:]]+(RSA|EC|DSA|OPENSSH|PGP)?[[:space:]]*PRIVATE KEY-----' \
+hass '-----BEGIN[[:space:]]+(RSA|EC|DSA|OPENSSH|PGP)?[[:space:]]*PRIVATE KEY-----' \
   && block "hardcoded Private Key" "PEM-format private key"
 
-if has '"type"[[:space:]]*:[[:space:]]*"service_account"' && has '"private_key"[[:space:]]*:'; then
+if hass '"type"[[:space:]]*:[[:space:]]*"service_account"' && has '"private_key"[[:space:]]*:'; then
   block "hardcoded GCP Service Account JSON" "Use a GOOGLE_APPLICATION_CREDENTIALS path instead"
 fi
 
 # A secret in package.json
-if [[ "$FILE_PATH" =~ package\.json$ ]] && has '(AKIA|ghp_|sk_live_|sk_test_|sb_secret_)'; then
+if [[ "$FILE_PATH" =~ package\.json$ ]] && hass '(AKIA|ghp_|sk_live_|sk_test_|sb_secret_)'; then
   block "secret inside package.json" "It is exposed on npm run"
 fi
 
@@ -1721,7 +1957,7 @@ fi
 
 # XSS — dangerouslySetInnerHTML warns when no sanitize accompanies it (not blocked:
 # an existing sanitize import in the same file may not be visible in this diff)
-if has 'dangerouslySetInnerHTML' && ! hasi 'dompurify|sanitize'; then
+if hass 'dangerouslySetInnerHTML' && ! hasi 'dompurify|sanitize'; then
   warn "dangerouslySetInnerHTML detected: $FILE_PATH" \
        "Sanitize it with DOMPurify or similar, or replace it with text rendering"
 fi

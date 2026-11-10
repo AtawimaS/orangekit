@@ -2622,6 +2622,31 @@ FXP
     bad "hook edge cases: $(printf '%s\n' "$hec_out" | tail -1)" "$(printf '%s\n' "$hec_out" | grep '^FAIL' | head -3 | cut -c1-160)"
   fi
 
+  # ── process budget per hook call — on Windows each exec costs ~15–30 ms, so the count is the cost (CI run 7: 3.1–3.7 s per call) ──
+  sec "process budget per hook call (fixed inputs, PATH shim)"
+  local pb_out
+  if pb_out=$(bash "$ROOT/scripts/fixtures/proc-budget.sh" "$ROOT" 2>&1); then
+    ok "process budget: $(printf '%s\n' "$pb_out" | tail -1) · $(printf '%s\n' "$pb_out" | grep -c '^ok') calls within budget"
+  else
+    bad "process budget: $(printf '%s\n' "$pb_out" | tail -1)" "$(printf '%s\n' "$pb_out" | grep '^FAIL' | head -3 | cut -c1-160)"
+  fi
+
+  local compat_out warm_out
+  if compat_out=$(bash "$ROOT/scripts/fixtures/win-compat.sh" "$ROOT" 2>&1); then
+    ok "Windows shim simulation: $(printf '%s\n' "$compat_out" | tail -1)"
+  else
+    bad "Windows shim simulation" "$compat_out"
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    if warm_out=$(python3 "$ROOT/scripts/fixtures/session-warmup.py" "$ROOT" 2>&1); then
+      ok "SessionStart worker lifecycle: $(printf '%s\n' "$warm_out" | tail -1)"
+    else
+      bad "SessionStart worker lifecycle" "$warm_out"
+    fi
+  else
+    warn "SessionStart worker lifecycle: unverified (Python unavailable)"
+  fi
+
   # ── orphan fixtures ────────────────────────────────────────────────
   # Compare what was **actually fed** above against the directory. Because which fixture is used is not re-derived
   # (the ${event}.json interpolation + the literal references are not reimplemented), it stays in agreement forever
@@ -2653,8 +2678,9 @@ FXP
     { printf 'ghost-hook|2026-01-01T00:00:00Z|x|0\n'
       awk 'BEGIN{ for (i = 0; i < 2100; i++) print "noisy-hook|2026-01-02T00:00:00Z|x|0" }'
     } > "$rt/hookrun.log"
+    # Rotation runs in session-brief (orangekit_rotate_logs), not in every heartbeat — the heartbeat appends, then the rotation
     ORANGEKIT_STATE_DIR="$rt" ORANGEKIT_ROOT="$rt" ORANGEKIT_HOOK_NAME="noisy-hook" \
-      bash -c '. "$1/scripts/lib/common.sh"; orangekit_heartbeat 0' _ "$ROOT" >/dev/null 2>&1
+      bash -c '. "$1/scripts/lib/common.sh"; orangekit_heartbeat 0; orangekit_rotate_logs' _ "$ROOT" >/dev/null 2>&1
     rn=$(num "$(wc -l < "$rt/hookrun.log" 2>/dev/null | tr -d ' ')")
     # One awk, no pipe: `awk | grep -qx` under pipefail read SIGPIPE as "not found" — ghost-hook is the first line, grep
     # exits on it while awk still writes ~1000 lines (measured on ubuntu:24.04: 2/400 false "erased"; every ubuntu-latest run)
@@ -2672,7 +2698,7 @@ FXP
     # graph.log — of the three logs, only this one had no rotation (evaluation v6 · E-28). Same approach: look at behaviour.
     awk 'BEGIN{ for (i = 0; i < 5100; i++) print "2026-01-01T00:00:00Z|build|security-check" }' > "$rt/graph.log"
     ORANGEKIT_STATE_DIR="$rt" ORANGEKIT_ROOT="$rt" \
-      bash -c '. "$1/scripts/lib/common.sh"; orangekit_edge build handoff' _ "$ROOT" >/dev/null 2>&1
+      bash -c '. "$1/scripts/lib/common.sh"; orangekit_edge build handoff; orangekit_rotate_logs' _ "$ROOT" >/dev/null 2>&1
     rn=$(num "$(wc -l < "$rt/graph.log" 2>/dev/null | tr -d ' ')")
     if [ "$rn" -gt 0 ] && [ "$rn" -le 2600 ] && tail -1 "$rt/graph.log" | grep -q '|build|handoff$'; then
       ok "graph.log size after rotation is bounded (${rn} lines ≤ 2600) · last edge preserved"

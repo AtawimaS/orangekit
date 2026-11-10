@@ -11,12 +11,48 @@
 #
 # SessionStart is one of the three events where plain stdout becomes the context as-is.
 
+# Private detached entry point: the supervisor reaps both jobs. Each job owns a process group;
+# disable job control inside it so jq/sleep stay in that group. A stalled build and all its
+# children are killed after 20 s (below SessionStart's 30 s timeout), then its private file is removed.
+# No hook pipes survive: the caller redirects all three descriptors before starting nohup.
+if [ "${1:-}" = --warm-transcript ]; then
+  set -m
+  (
+    set +m
+    _OK_PY_LAZY=1
+    source "$2/scripts/lib/common.sh"
+    CLAUDE_PROJECT_DIR=$3 ORANGEKIT_STATE_DIR=$4
+    ORANGEKIT_ROOT=$(orangekit_root '')
+    orangekit_transcript_index "$5" "$6" || exit 0
+  ) &
+  warm_pid=$!
+  ( set +m; sleep 20; kill -KILL -- "-$warm_pid" 2>/dev/null || true ) &
+  warm_timer=$!
+  wait "$warm_pid" 2>/dev/null || true
+  kill -KILL -- "-$warm_timer" 2>/dev/null || true
+  wait "$warm_timer" 2>/dev/null || true
+  warm_sid=${6//[^A-Za-z0-9._-]/}
+  rm -f "$4/transcript-index.${warm_sid:-nosession}.$$" 2>/dev/null
+  exit 0
+fi
+
 INPUT=$(cat 2>/dev/null || printf '{}')
 # shellcheck source=lib/common.sh
 source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/lib/common.sh"
 orangekit_begin "session-brief" "$INPUT"
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Warm resumed transcripts without delaying the briefing. The normal index writer keeps its
+# atomic temp+rename protocol; a racing gate reads a complete cache or builds its own copy.
+orangekit_fields "$INPUT" WARM_TRANSCRIPT '.transcript_path' WARM_SESSION '.session_id'
+orangekit_slashes_v WARM_TRANSCRIPT "$WARM_TRANSCRIPT"
+if [ -r "$WARM_TRANSCRIPT" ] && command -v jq >/dev/null 2>&1 && command -v nohup >/dev/null 2>&1; then
+  set -m   # the supervisor must also survive cancellation of the hook's process group
+  nohup bash "$PLUGIN_ROOT/scripts/session-brief.sh" --warm-transcript "$PLUGIN_ROOT" "$ORANGEKIT_ROOT" \
+    "$(orangekit_state_dir)" "$WARM_TRANSCRIPT" "$WARM_SESSION" </dev/null >/dev/null 2>&1 &
+  set +m
+fi
 
 # ── 1. T0 operating contract ──────────────────────────────────────────
 # The project decides the response language — T0's {{RESPONSE_LANGUAGE}} is substituted here.
@@ -482,5 +518,11 @@ if [ -n "$LATEST_HE" ]; then
     fi
   fi
 fi
+
+# Log rotation moved here from every heartbeat/edge (common.sh orangekit_rotate_logs, consumer report E10) — after the
+# liveness report above has read hookrun.log, so it still sees every row since the previous session. And the transcript
+# indexes (common.sh orangekit_transcript_index) of sessions untouched for a week, plus private copies a killed hook left behind
+orangekit_rotate_logs
+find "$(orangekit_state_dir)" -maxdepth 1 -name 'transcript-index.*' -mtime +7 -delete 2>/dev/null || true
 
 exit 0

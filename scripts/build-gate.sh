@@ -12,19 +12,19 @@
 # v3 (1) emits continue:false + systemMessage and
 #     (2) parses the transcript JSONL and looks only at actual Bash tool calls.
 
-INPUT=$(cat 2>/dev/null || printf '{}')
+INPUT=$(< /dev/stdin) 2>/dev/null || INPUT='{}'   # $(< …) reads without a cat exec; unreadable stdin → {} as before
 # shellcheck source=lib/common.sh
+_OK_PY_LAZY=1   # never runs Python: skip win-compat's Windows python probes on every call
 source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/lib/common.sh"
+# One jq for all three fields (and the heartbeat's timestamp) — read first, it has no side effect
+orangekit_fields "$INPUT" STOP_ACTIVE '.stop_hook_active' TRANSCRIPT '.transcript_path' SESSION_ID '.session_id'
 orangekit_begin "build-gate" "$INPUT"
 
 cd "$ORANGEKIT_ROOT" 2>/dev/null || exit 0
 orangekit_edge "build" "build-gate"   # automatic at Stop — records the traversal fact regardless of the verdict
 
 # Infinite-loop prevention: if we are already continuing because of this hook, do not block again
-STOP_ACTIVE=$(orangekit_field "$INPUT" '.stop_hook_active')
 [ "$STOP_ACTIVE" = "true" ] && exit 0
-
-TRANSCRIPT=$(orangekit_field "$INPUT" '.transcript_path')
 
 # ── 1. Were any source files changed in this session? ─────────────────
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
@@ -35,7 +35,9 @@ git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 BASELINE="$(orangekit_state_dir)/session-baseline.txt"
 CURRENT=$(orangekit_worktree_snapshot)
 
-if [ -f "$BASELINE" ]; then
+if [ -z "$CURRENT" ]; then
+  CHANGED=""   # a clean tree: both branches below would give "" (the one empty line they see is dropped by the `$( )`)
+elif [ -f "$BASELINE" ]; then
   # The difference is taken on snapshot **lines**, then only the paths are extracted: newly dirtied files and
   # files that were already dirty but changed again this time both remain.
   CHANGED=$(comm -13 <(sort "$BASELINE") <(printf '%s\n' "$CURRENT" | sort) 2>/dev/null \
@@ -46,6 +48,7 @@ fi
 
 # Source extensions only (config, docs and markdown excluded)
 # dart is the Flutter app axis — leave it out and a session that only edited .dart passes with no verification
+[ -z "$CHANGED" ] && exit 0   # = SRC_CHANGED empty below, without its three greps
 SRC_CHANGED=$(grep <<<"$CHANGED" -E '\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|dart|rb|php|vue|svelte)$' \
   | grep -vE '\.(config|test|spec)\.' | grep -vE '^\s*$' || true)
 
@@ -67,17 +70,18 @@ SRC_CHANGED=$(grep <<<"$CHANGED" -E '\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|s
 # A transcript that cannot be read is undecidable — do not block (the three-state rule below).
 { [ -n "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ] && command -v jq >/dev/null 2>&1; } || exit 0
 
-# jq is wrapped in `{ … || true; }` for the same reason as _verification_ran below (SIGPIPE).
-# Every pass here reads line by line with `fromjson?`: one line jq cannot parse (a lone surrogate `\ud83d`, a truncated last line)
+# The three transcript passes below (files touched · verification commands · render traces) read **one** shared index
+# (common.sh orangekit_transcript_index): it carries each pass's own jq program verbatim and is cached per session, so only
+# the appended tail is parsed — three full jq passes cost ~3 s per turn on a 230 MB transcript (consumer report E3).
+# Every pass reads line by line with `fromjson?`: one line jq cannot parse (a lone surrogate `\ud83d`, a truncated last line)
 # stopped jq there, so every call after it was invisible — tests run later read as "not run" and blocked (consumer report N2).
-_session_touched() {
-  { jq -rR 'fromjson? | select(.type=="assistant") | (.cwd // "") as $cwd | .message.content[]? | select(.type=="tool_use")
-            | if (.name | test("^(Edit|Write|MultiEdit|NotebookEdit)$"))
-                then "E\t" + (.input.file_path // .input.notebook_path // "")
-              elif .name=="Bash" then "B\t" + $cwd + "\t" + ((.input.command // "") | gsub("\r"; "") | gsub("\n"; "\u001f"))
-              else empty end' "$TRANSCRIPT" 2>/dev/null || true; } \
-  | ORANGEKIT_SRC_LIST="$SRC_CHANGED" ORANGEKIT_ROOTS="$ORANGEKIT_ROOT
+# No index file could be written at all (no writable state dir and no temp dir): read as "transcript cannot be read" — do not block
+orangekit_transcript_index "$TRANSCRIPT" "$SESSION_ID" || exit 0
+_session_touched() {   # the T lines of the index = the old pass: "E<TAB>file" · "B<TAB>cwd<TAB>command (newlines as \037)"
+  ORANGEKIT_SRC_LIST="$SRC_CHANGED" ORANGEKIT_ROOTS="$ORANGEKIT_ROOT
 $(cd "$ORANGEKIT_ROOT" 2>/dev/null && pwd -P)" awk '
+    substr($0, 1, 2) != "T\t" { next }
+    { $0 = substr($0, 3) }
     # A bounded mention — look at the characters on both sides so `a.ts` does not match inside `data.tsx`
     function mention(s, p,    i, k, pre, post) {
       k = 0
@@ -237,7 +241,7 @@ $(cd "$ORANGEKIT_ROOT" 2>/dev/null && pwd -P)" awk '
              s0 = 1
              for (i = 1; i <= nt + 1; i++) if (i > nt || substr(T[i], 1, 1) == "\001") { if (i > s0) judge(s0, i - 1); s0 = i + 1 }
              next }
-    END { for (i = 1; i <= n; i++) if (hit[i]) print w[i] }'
+    END { for (i = 1; i <= n; i++) if (hit[i]) print w[i] }' "$ORANGEKIT_TI"
 }
 SRC_CHANGED=$(_session_touched)
 [ -z "$SRC_CHANGED" ] && exit 0
@@ -277,15 +281,13 @@ fi
 # `python -m pip install pytest` is not verification. Known limit: if a line of a heredoc **body** in a file
 # starts with a verifier name it is counted as a run — the inherent boundary of judging from command text alone.
 #
-# **jq is wrapped in `{ … || true; }`.** awk exits on the first verification command, and if jq is still writing at that
-# moment it dies of SIGPIPE (141) — under pipefail that 141 became the pipeline's value and turned "ran" into "did not run".
-# In long sessions whose transcript exceeds the pipe buffer (~64KB) this blocked **almost every turn** (consumer report
-# 2026-10-23~28). Wrapped, the verdict is decided by awk's END alone.
+# The commands are the V lines of the transcript index — what the old `jq … | awk` pass fed this awk. awk now reads the file
+# itself, so no writer can die of SIGPIPE when it exits early (that 141 under pipefail once read "ran" as "did not run" and
+# blocked almost every turn of a long session — consumer report 2026-10-23~28).
 _verification_ran() {
-  { jq -rR 'fromjson? | select(.type=="assistant") | .message.content[]?
-          | select(.type=="tool_use" and .name=="Bash") | .input.command // empty' \
-     "$TRANSCRIPT" 2>/dev/null || true; } \
-  | awk '
+  awk '
+    substr($0, 1, 2) != "V\t" { next }
+    { $0 = substr($0, 3) }
     function head(s) {
       sub(/^[ \t]+/, "", s)
       while (match(s, /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/)) s = substr(s, RLENGTH + 1)
@@ -305,7 +307,7 @@ _verification_ran() {
         # App axis — flutter·dart count only when the subcommand is a verification (flutter pub get·flutter run are not)
         if (t ~ /^(flutter|dart)$/ && s ~ /^[a-z0-9.\/-]+[ \t]+(analyze|test|build)([ \t]|$)/) { found = 1; exit }
       } }
-    END { exit found ? 0 : 1 }'
+    END { exit found ? 0 : 1 }' "$ORANGEKIT_TI"
 }
 BUILD_RAN=0
 _verification_ran && BUILD_RAN=1
@@ -326,11 +328,8 @@ _ui_render_notice() {
 
   # A trace that the render was checked — a probe or browser-automation Bash call, or a built-in /run skill call.
   # Not the presence of a string but **an actual tool call** (the lesson of v2's stop-guard).
-  if { jq -rR 'fromjson? | select(.type=="assistant") | .message.content[]?
-            | select(.type=="tool_use")
-            | if .name=="Bash" then (.input.command // empty)
-              elif .name=="Skill" then (.input.skill // empty)
-              else empty end' "$TRANSCRIPT" 2>/dev/null || true; } \
+  # The U lines of the transcript index (Bash commands and Skill names, as the old pass printed them), into the same grep
+  if { awk 'substr($0, 1, 2) == "U\t" { print substr($0, 3) }' "$ORANGEKIT_TI" 2>/dev/null || true; } \
      | grep -qiE '(ui-probe|playwright|puppeteer|chromium|(^|:)run$)'; then
     return 0
   fi
