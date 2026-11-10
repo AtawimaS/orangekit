@@ -61,6 +61,10 @@ try:
             time.sleep(.1)
         else:
             raise AssertionError('warm worker process group survived deadline')
+        # The supervisor (its own group) removes the private file just after the worker group dies — give it up to 2 s
+        settle = time.monotonic() + 2
+        while list(state.glob('transcript-index.*')) and time.monotonic() < settle:
+            time.sleep(.05)
         assert not list(state.glob('transcript-index.*')), 'partial cache/temp survived timeout'
         print('PASS timed-out worker group reaped; no partial cache or private file', flush=True)
 finally:

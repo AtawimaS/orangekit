@@ -241,6 +241,20 @@ PY
 }
 
 # ── generation through the Codex CLI ──────────────────────────────────────────
+# Stops the watchdog's Codex. On Windows npm's bin/codex.js spawns the native codex.exe under node.exe (elsewhere it execs it),
+# and a Git Bash kill ends only node.exe — codex.exe would keep running and land a late image. So the Windows process tree
+# goes first: only with a Windows pid and taskkill, a failure ignored; the plain kill runs either way (the only step elsewhere).
+_winpid() { [ -r "/proc/$1/winpid" ] && cat "/proc/$1/winpid" 2>/dev/null; }
+stop_tree() {
+  local wp
+  case "${OSTYPE:-}" in msys*|cygwin*)
+    if command -v taskkill >/dev/null 2>&1 && wp=$(_winpid "$1") && [ -n "$wp" ]; then
+      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' taskkill /F /T /PID "$wp" >/dev/null 2>&1 || true
+    fi ;;
+  esac
+  kill "$1" 2>/dev/null
+}
+
 codex_generate() {   # $1 prompt · $2 out · $3 timeout
   local prompt="$1" out="$2" timeout="$3" st
   st=$(codex_state)
@@ -269,7 +283,7 @@ codex_generate() {   # $1 prompt · $2 out · $3 timeout
       -o "$w/last.txt" - < "$w/prompt.txt" > "$w/log.txt" 2>&1 ) &
   local pid=$! waited=0
   while kill -0 "$pid" 2>/dev/null; do
-    [ "$waited" -ge "$timeout" ] && { kill "$pid" 2>/dev/null; bad "Codex did not finish within ${timeout}s"; rm -rf "$w"; return 1; }
+    [ "$waited" -ge "$timeout" ] && { stop_tree "$pid"; bad "Codex did not finish within ${timeout}s"; rm -rf "$w"; return 1; }
     sleep 1; waited=$((waited+1))
   done
   wait "$pid"; local rc=$?
@@ -405,6 +419,25 @@ FAKE
   [ "$rc" -eq 2 ] && ok "Codex not logged in → exit 2 before any call" || bad "not-logged-in Codex was called (exit $rc)"
   ( CODEX_BIN="$FC" codex_generate "a cat" "$t/out/x.gif" 30 ) >/dev/null 2>&1; rc=$?
   [ "$rc" -eq 1 ] && ok "unsupported --out extension → exit 1 before the call" || bad "a .gif target was not refused"
+
+  # Watchdog stop (stop_tree), simulated: a fake Windows pid and a logging taskkill. The target must die in every case
+  mkdir -p "$t/winbin"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "$TK_LOG"\nexit "${TK_RC:-0}"\n' > "$t/winbin/taskkill"; chmod +x "$t/winbin/taskkill"
+  st_case() {   # $1 OSTYPE · $2 Windows pid ('' = none) · $3 taskkill exit → "<taskkill args>|dead|alive"
+    local p n=0 st_wp="$2"; : > "$t/tk.log"; sleep 30 >/dev/null 2>&1 & p=$!
+    ( OSTYPE="$1"; _winpid() { [ -n "$st_wp" ] && printf "%s\n" "$st_wp"; }; PATH="$t/winbin:$PATH" TK_LOG="$t/tk.log" TK_RC="$3" stop_tree "$p" )
+    while kill -0 "$p" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.1; n=$((n+1)); done
+    if kill -0 "$p" 2>/dev/null; then kill "$p"; printf '%s|alive' "$(cat "$t/tk.log")"; else printf '%s|dead' "$(cat "$t/tk.log")"; fi
+    wait "$p" 2>/dev/null
+  }
+  out=$(st_case msys 4242 0)
+  [ "$out" = "/F /T /PID 4242|dead" ] && ok "Windows: the watchdog ends Codex's process tree (taskkill /F /T), then kills" || bad "Windows tree kill wrong — '$out'"
+  out=$(st_case msys 4242 1)
+  [ "$out" = "/F /T /PID 4242|dead" ] && ok "Windows: a failing taskkill is ignored and the kill still runs" || bad "a failing taskkill stopped the kill — '$out'"
+  out=$(st_case msys '' 0)
+  [ "$out" = "|dead" ] && ok "Windows without a Windows pid: no taskkill, the kill still runs" || bad "taskkill ran without a Windows pid — '$out'"
+  out=$(st_case darwin 4242 0)
+  [ "$out" = "|dead" ] && [ "$(st_case linux-gnu 4242 0)" = "|dead" ] && ok "macOS · Linux: only the kill, as before (no taskkill)" || bad "taskkill ran outside Windows — '$out'"
 
   # Price notice — gpt-image-2.5-flare has no published per-size price, so everything must be 'unknown'
   estimate 1024x1024 medium 1 | grep -q 'unknown' \
