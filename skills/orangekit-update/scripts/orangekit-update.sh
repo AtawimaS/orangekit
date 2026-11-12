@@ -9,6 +9,7 @@
 #   orangekit-update.sh [--plugin-root <dir>] [--project <dir>]                check: report what is behind, change nothing
 #   orangekit-update.sh [--plugin-root <dir>] [--project <dir>] --apply        update, then check again
 #   orangekit-update.sh ... --apply --retire     also move cards the plugin no longer ships to .claude/deprecated/ (14-day shadow)
+#   orangekit-update.sh [--project <dir>] --changes   audit input: diff of each installed file, before the last update → now
 #   orangekit-update.sh --self-test              proves check → apply → check on a project an older version installed
 #   orangekit-update.sh --help
 #
@@ -17,11 +18,14 @@
 #              An older copy the user edited is kept as .bak; a same-version edit is preserved
 #   reported   a v2 harness (→ /orangekit-migrate) · orangekit.config.json in an old shape · guides whose stack premise
 #              moved (→ /stack-guide-generator) · cards the plugin no longer ships (moved only with --retire)
+#   baseline   before an apply that writes anything, the installed files as they were go to .orangekit/update-baseline/
+#              (gitignored by init) — what --changes diffs against. An apply with nothing pending keeps the previous one
 #   untouched  project cards (project-structure · code-conventions) · CLAUDE.md · generated seams · dev/ · .gitignore
 #
 # Undecidable (no jq) is reported, not guessed: the config and guide steps are skipped and the run says so.
 #
 # Exit code: 0 = up to date (or updated and verified) · 1 = something is behind or needs a person · 2 = cannot run
+#   --changes: 0 = changes printed · 1 = no file changed since the baseline · 2 = no baseline (no update applied yet)
 
 set -uo pipefail   # no -e: every step runs to the end so the full report is produced
 
@@ -39,7 +43,7 @@ warn() { WARN=$((WARN+1)); printf "  ${C_Y}!${C_0} %s\n" "$1"; [ -n "${2:-}" ] &
 sec()  { printf "\n${C_D}── %s ─────────────────────────────${C_0}\n" "$1"; }
 num()  { local v; v=$(printf '%s' "${1:-}" | tr -d '[:space:]'); case "$v" in ''|*[!0-9]*) printf '0';; *) printf '%s' "$v";; esac; }
 
-PLUGIN_ROOT="" PROJECT="" APPLY=0 RETIRE=0 SELFTEST=0
+PLUGIN_ROOT="" PROJECT="" APPLY=0 RETIRE=0 SELFTEST=0 CHANGES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --plugin-root|--project)
@@ -48,6 +52,7 @@ while [ $# -gt 0 ]; do
       if [ "$1" = --plugin-root ]; then PLUGIN_ROOT="$2"; else PROJECT="$2"; fi; shift 2 ;;
     --apply)       APPLY=1; shift ;;
     --retire)      RETIRE=1; shift ;;
+    --changes)     CHANGES=1; shift ;;
     --self-test)   SELFTEST=1; shift ;;
     -h|--help)     awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0 ;;
     *) printf 'unknown argument: %s (see --help)\n' "$1" >&2; exit 2 ;;
@@ -237,6 +242,33 @@ step_retired() {  # $1 = check|apply
   human "$n card(s) the plugin no longer ships:$list" "they still load every matching session — re-run with --apply --retire to move them to .claude/deprecated/ (14-day shadow)"
 }
 
+# ── Audit baseline ─────────────────────────────────────────────────────
+# The plugin-installed files (T1 cards · stack cards · references · guide skills). Project cards are skipped by name;
+# .bak copies the installers leave are not rules
+_installed() {  # $1 root → relative paths, one per line
+  (cd "$1" 2>/dev/null && find .claude/rules .claude/references .claude/skills/*-guide -type f ! -name '*.bak' 2>/dev/null) \
+    | grep -vE '^\.claude/rules/(project-structure|code-conventions)\.md$' | LC_ALL=C sort || true
+}
+BASE_DIR() { printf '%s/.orangekit/update-baseline' "$PROJECT"; }
+snapshot() {  # $1 version being installed
+  local b f; b=$(BASE_DIR); rm -rf "$b"; mkdir -p "$b/files"
+  _installed "$PROJECT" | while IFS= read -r f; do mkdir -p "$b/files/$(dirname "$f")" && cp -p "$PROJECT/$f" "$b/files/$f"; done
+  printf 'to=%s\ndate=%s\n' "$1" "$(date +%Y-%m-%d)" > "$b/info"
+}
+changes() {
+  local b f n=0; b=$(BASE_DIR)
+  [ -f "$b/info" ] || { printf 'no update baseline in %s — run the update (--apply) first; the audit compares against it\n' "${b#$PROJECT/}"; exit 2; }
+  printf 'orangekit update — changes since the baseline (%s)\n' "$(tr '\n' ' ' < "$b/info")"
+  printf 'note: a file a person edited after the update shows here too\n'
+  while IFS= read -r f; do
+    if [ ! -f "$b/files/$f" ]; then n=$((n+1)); printf '\n=== new: %s\n' "$f"; cat "$PROJECT/$f"
+    elif [ ! -f "$PROJECT/$f" ]; then n=$((n+1)); printf '\n=== removed: %s\n' "$f"
+    elif ! cmp -s "$b/files/$f" "$PROJECT/$f"; then n=$((n+1)); printf '\n=== changed: %s\n' "$f"; diff -u "$b/files/$f" "$PROJECT/$f" | tail -n +3; fi
+  done < <({ _installed "$PROJECT"; _installed "$b/files"; } | LC_ALL=C sort -u)
+  printf '\n%s file(s) changed\n' "$n"
+  [ "$n" -gt 0 ] && exit 0 || exit 1
+}
+
 run() {  # $1 = check|apply
   step_v2 || return 0      # a v2 project goes to /orangekit-migrate first — nothing else is touched
   step_config
@@ -258,6 +290,7 @@ main() {
   fi
 
   if [ "$APPLY" -eq 0 ]; then
+    [ "$CHANGES" -eq 1 ] && changes
     run check
     sec "summary"
     if [ "$PENDING" -eq 0 ] && [ "$HUMAN" -eq 0 ] && [ "$UNDEC" -eq 0 ]; then ok "up to date with v${ver:-?}"; exit 0; fi
@@ -267,6 +300,10 @@ main() {
     exit 1
   fi
 
+  # Baseline for the audit — only when this apply writes something, so a no-op apply keeps the last real one
+  run check >/dev/null 2>&1
+  [ "$PENDING" -gt 0 ] && snapshot "${ver:-?}"
+  PENDING=0; HUMAN=0; HUMAN_LIST=""; UNDEC=0; UNDEC_LIST=""; PASS=0; WARN=0; FAIL=0
   run apply
   # Verify — "the installer ran" is not "the project is current". Check again from scratch
   local applied_fail=$FAIL
@@ -315,6 +352,8 @@ self_test() {
     || bad "stack rule card not listed"
   printf '%s' "$out" | grep -q 'no longer ships:.*old-card.md' && ok "the retired card is reported" || bad "retired card not reported"
   [ "$(_tree "$P")" = "$tree0" ] && ok "check changed nothing (whole .claude tree compared)" || bad "check modified a file under .claude"
+  bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --changes >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "--changes before any update → exit 2 (no baseline to audit against)" || bad "--changes without a baseline → exit $rc (expected 2)"
 
   sec "apply"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --apply 2>&1); rc=$?
@@ -329,6 +368,12 @@ self_test() {
   grep -q 'team note: keep' "$P/.claude/rules/code-change.md" && ok "same-version user edit preserved" || bad "user edit overwritten"
   [ "$(cksum < "$P/.claude/rules/project-structure.md")" = "$sum_ps" ] && ok "project card untouched" || bad "project card modified"
   [ -f "$P/.claude/rules/old-card.md" ] && ok "retired card left in place without --retire" || bad "retired card moved without --retire"
+  out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --changes 2>&1); rc=$?
+  [ "$rc" -eq 0 ] && grep -q '=== changed: .claude/rules/workflow-routing.md' <<<"$out" \
+    && grep -q '=== new: .claude/rules/security.md' <<<"$out" && grep -q '^-<!-- orangekit-rule-version: 0.0.1' <<<"$out" \
+    && ! grep -q 'project-structure.md' <<<"$out" \
+    && ok "--changes → the aged card as a diff from its old text, the new card in full, project cards left out" \
+    || bad "--changes did not report the update (exit $rc)" "$(printf '%s' "$out" | grep '^===' | head -4 | tr '\n' ' ')"
 
   sec "apply --retire"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --apply --retire 2>&1); rc=$?
@@ -337,6 +382,10 @@ self_test() {
     && ok "retired card moved to a dated shadow" || bad "retired card not shadowed"
   out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" 2>&1); rc=$?
   [ "$rc" -eq 0 ] && ok "check afterwards → exit 0 (up to date)" || bad "check afterwards → exit $rc" "$(printf '%s' "$out" | tail -4 | tr '\n' ' ')"
+  bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --apply >/dev/null 2>&1
+  out=$(bash "$0" --plugin-root "$PLUGIN_ROOT" --project "$P" --changes 2>&1)   # here-strings, not `| grep -q`: under pipefail a large diff is 141 (B1)
+  grep -q '=== changed: .claude/rules/workflow-routing.md' <<<"$out" \
+    && ok "an apply with nothing pending keeps the last baseline (the audit still sees that update)" || bad "a no-op apply overwrote the audit baseline"
 
   sec "no downgrade (a newer or forked plugin set the project up)"
   local N="$T/newer"; mkdir -p "$N"
