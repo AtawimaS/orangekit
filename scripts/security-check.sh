@@ -115,6 +115,32 @@ _gate_rel() {   # $1 path (absolute or relative) $2 base directory → the proje
   case "$p" in /*|[A-Za-z]:/*) ;; *) p="${2:-$ORANGEKIT_ROOT}/${p#./}" ;; esac   # C:/… is absolute too (Windows)
   case "$p" in "$ORANGEKIT_ROOT"/*) printf '%s' "${p#"$ORANGEKIT_ROOT"/}" ;; esac
 }
+_norm_v() {   # $1 variable  $2 absolute path → the path with `.` and `..` segments folded, no fork
+  local s segs=() out=() lead=""
+  case "$2" in [A-Za-z]:/*) lead=${2%%/*} ;; esac
+  IFS=/ read -r -d '' -a segs <<<"${2#"$lead"}" || true   # read, not `for s in $p`: a `*` in a segment must not glob
+  [ ${#segs[@]} -gt 0 ] && segs[${#segs[@]}-1]=${segs[${#segs[@]}-1]%$'\n'}   # the here-string's trailing newline
+  for s in ${segs[@]+"${segs[@]}"}; do
+    case "$s" in ''|.) ;; ..) [ ${#out[@]} -gt 0 ] && unset 'out[${#out[@]}-1]' ;; *) out+=("$s") ;; esac
+  done
+  local IFS=/; printf -v "$1" '%s/%s' "$lead" "${out[*]-}"
+}
+_cd_base_v() {   # $1 variable  $2 command text before a target  $3 start directory → the directory after its last `cd`/`pushd`;
+  # returns 1 when that `cd` cannot be followed (no argument · `-` · `~` · a variable or substitution) — skip rather than guess (B12)
+  local w base="$3" next=0 arg words=()
+  read -r -d '' -a words <<<"${2//[;&|()]/ ; }" || true   # read, not `for w in $cmd`: no glob expansion
+  for w in ${words[@]+"${words[@]}"}; do
+    if [ "$next" = 1 ]; then
+      next=0; [ "$w" = ";" ] && return 1
+      arg=${w#[\"\']}; arg=${arg%[\"\']}
+      case "$arg" in -|*[\$\`~]*) return 1 ;; esac
+      orangekit_slashes_v arg "$arg"
+      case "$arg" in /*|[A-Za-z]:/*) base=$arg ;; *) base="$base/$arg" ;; esac
+    elif [ "$w" = cd ] || [ "$w" = pushd ]; then next=1; fi
+  done
+  [ "$next" = 1 ] && return 1
+  printf -v "$1" '%s' "$base"
+}
 # The owner table — every card's and skill node's path ERE, built **once per hook call** by one pass over all cards and one jq
 # over the graph. It used to be re-derived per card and per skill node for every write target (~7 processes a card, ~10 a node:
 # 122 processes for one owned Write with 11 cards). The transformations are _card_re's and _globs_ere's, unchanged; the
@@ -336,12 +362,17 @@ _kg_run() {
   # command with none of the three has no target, and the ~10 processes of the extraction are skipped
   case "$F_CMD" in *'>'*|*tee*|*sed*) ;; *) return 0 ;; esac
   if [ "$TOOL_NAME" = "Bash" ] && [ -n "$ORANGEKIT_ROOT" ]; then
-    local _gcwd _gcmd _gt _gabs
+    local _gcwd _gcmd _gt _gabs _gbase
     # cwd in the same form as ORANGEKIT_ROOT — on Windows it arrives as C:\… and a target under it never matched the root (S1)
     orangekit_slashes_v _gcwd "$F_CWD"; _gcmd=$F_CMD
     while IFS= read -r _gt; do
       [ -n "$_gt" ] || continue
-      _gabs=$_gt; case "$_gabs" in /*|[A-Za-z]:/*) ;; *) _gabs="${_gcwd:-$ORANGEKIT_ROOT}/${_gabs#./}" ;; esac
+      # a relative target resolves against the last `cd` before it in the same command, not the session cwd (B12)
+      case "$_gt" in
+        /*|[A-Za-z]:/*) _gabs=$_gt ;;
+        *) _cd_base_v _gbase "${_gcmd%%"$_gt"*}" "${_gcwd:-$ORANGEKIT_ROOT}" || continue
+           _norm_v _gabs "$_gbase/${_gt#./}" ;;
+      esac
       if [ -e "$_gabs" ]; then _knowledge_gate "$(_gate_rel "$_gabs")" 0; else _knowledge_gate "$(_gate_rel "$_gabs")" 1; fi
     done < <(_bash_targets "$_gcmd")
     _kg_flush

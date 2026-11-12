@@ -2320,6 +2320,10 @@ SKCASES
 0|-|Bash|cat > notes.txt <<'EOF'\nsee > migrations/0010_y.sql later\nEOF|none|s20|[norunner] a `>` inside a heredoc body is not a write → pass
 0|-|Bash|npm test > /tmp/test.log 2>&1|none|s21|[norunner] a log outside the project → pass
 0|-|Bash|cat > migrations/0009_x.sql <<'EOF'\nCREATE TABLE a (id int);\nEOF|read|s22|[norunner] Bash heredoc after reading the card → pass
+0|-|Bash|cd /tmp; sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s23|[norunner] B12 sed after `cd` out of the project → the target is not the project's file, pass
+2|data-modeling.md|Bash|cd migrations && sed -i '' 's/int/bigint/' 0001_init.sql|none|s24|[norunner] B12 sed after `cd` into the project → resolved against that cd, blocked
+2|data-modeling.md|Bash|cd src/.. && sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s25|[norunner] B12 `..` in a cd is folded → still the project's file, blocked
+0|-|Bash|cd "$D" && sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s26|[norunner] B12 a cd that cannot be followed → skipped, not guessed
 2|test-driven-development|Write|src/server/points.ts|code|s1|[runner] test runner present · new behavior code · TDD not called → blocked
 0|-|Write|src/server/points.ts|code-tdd|s2|[runner] TDD skill called → pass
 0|-|Write|src/server/points.test.ts|code|s3|[runner] a test file → TDD not required
