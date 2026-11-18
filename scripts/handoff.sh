@@ -81,10 +81,15 @@ if [ "$EVENT" = "SessionEnd" ]; then
   HD="$(orangekit_handoff_dir)"
   if mkdir -p "$HD" 2>/dev/null; then
     TS=$(date -u '+%Y%m%d-%H%M%S')
-    printf '%s\n' "$OUT" > "$HD/${TS}.md" 2>/dev/null || true
+    # noclobber: two handoffs in the same second (SessionEnd + PreCompact, or two sessions) each keep their file (B17)
+    HF="$HD/${TS}.md"; n=1
+    while ! (set -C; printf '%s\n' "$OUT" > "$HF") 2>/dev/null && [ "$n" -le 9 ] && [ -e "$HF" ]; do HF="$HD/${TS}-${n}.md"; n=$((n + 1)); done
     # Keep only the 10 most recent (prevents unbounded growth)
-    # Rotate only the YYYYMMDD-HHMMSS.md files this hook writes — never delete a note someone placed by hand
-    { ls -1t "$HD"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].md 2>/dev/null || true; } | tail -n +11 | while IFS= read -r old; do rm -f "$old"; done
+    # Rotate only the YYYYMMDD-HHMMSS[-n].md files this hook writes — never delete a note someone placed by hand,
+    # nor one the project committed: deleting a tracked file shows up as a change nobody made (B16)
+    { ls -1t "$HD"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].md \
+             "$HD"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-[1-9].md 2>/dev/null || true; } | tail -n +11 \
+      | while IFS= read -r old; do git -C "$HD" ls-files --error-unmatch -- "${old##*/}" >/dev/null 2>&1 || rm -f "$old"; done
   fi
 fi
 

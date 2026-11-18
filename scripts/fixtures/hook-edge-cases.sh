@@ -6,6 +6,7 @@
 #   N3  a Windows file_path (C:\…) never matched in build-gate → an Edit-only session was never blocked
 #   N5  an invalid package.json logged a fake hook error (ERR trap) on every new-file Write
 #   N6  handoff used \s, which BSD sed (macOS) does not know → indented tasks were printed raw
+#   B16 handoff rotation deleted handoffs the project had committed · B17 two handoffs in one second overwrote each other
 #   E4  the advisory knowledge gate ran before the blocking gates (a block for the wrong reason, or none at all on a timeout)
 #   B7  the knowledge gate re-judged every card for every write target — cost grew with targets × cards × tool calls
 #   -c  `bash -c "git push --force …"` — the negative side (a feature branch through sh -c still passes)
@@ -122,6 +123,23 @@ HO=$(printf '{"hook_event_name":"PreCompact","cwd":"%s"}' "$P" | (cd "$P" && CLA
      ORANGEKIT_HANDOFF_DIR="$P/.st/handoff" bash "$R/scripts/handoff.sh" 2>/dev/null) | jq -r '.additionalContext // empty' 2>/dev/null)
 if printf '%s\n' "$HO" | grep -qx '  - nested open task' && printf '%s\n' "$HO" | grep -q 'progress 1/2'; then ok "N6 an indented task is counted and listed without its checkbox"
 else nok "N6 indented task" "$(printf '%s\n' "$HO" | grep -E 'progress|nested' | tr '\n' ' ')"; fi
+
+# ── B16/B17 · handoff rotation keeps committed files; two handoffs in one second both survive ──
+P="$T/b16"; proj "$P"; HD="$P/dev/handoff"; mkdir -p "$HD"
+i=10; while [ "$i" -lt 22 ]; do : > "$HD/20260101-0000$i.md"; i=$((i+1)); done
+(cd "$P" && git add dev/handoff/20260101-000010.md && git -c user.email=t@x -c user.name=t commit -q -m h)
+# A `date` that always answers the same second for the handoff's name, so the collision is certain, not a timing accident
+mkdir -p "$T/b17bin"; printf '#!/bin/sh\n[ "$2" = "+%%Y%%m%%d-%%H%%M%%S" ] && { echo 20991231-235959; exit 0; }\nexec /bin/date "$@"\n' > "$T/b17bin/date"; chmod +x "$T/b17bin/date"
+ho() { printf '{"hook_event_name":"SessionEnd","cwd":"%s"}' "$P" | (cd "$P" && PATH="$T/b17bin:$PATH" CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$P" ORANGEKIT_STATE_DIR="$P/.st" \
+     ORANGEKIT_HANDOFF_DIR="$1" bash "$R/scripts/handoff.sh" >/dev/null 2>&1); }
+ho "$HD"; ho "$HD"
+[ -f "$HD/20260101-000010.md" ] && ok "B16 rotation leaves a committed handoff in place" || nok "B16 committed handoff" "a tracked file was deleted"
+[ -f "$HD/20991231-235959.md" ] && [ -f "$HD/20991231-235959-1.md" ] && ok "B17 two handoffs in the same second keep two files" \
+  || nok "B17 same-second handoffs" "$(ls "$HD" | grep '^2099' | tr '\n' ' ')"
+n=$(ls "$HD" | grep -c '^20' || true)
+[ "$n" -le 11 ] && ok "B16 rotation still bounds the directory (10 + the committed one)" || nok "B16 rotation bound" "$n files"
+ho dev/handoff   # a relative ORANGEKIT_HANDOFF_DIR — git -C had already moved into it, so the tracked lookup missed
+[ -f "$HD/20260101-000010.md" ] && ok "B16 a relative handoff dir also keeps the committed file" || nok "B16 relative dir" "a tracked file was deleted"
 
 # ── -c payloads · the negative side (the positive side is in doctor's POS_FX) ──
 P="$T/c"; proj "$P"; : > "$T/c.jsonl"

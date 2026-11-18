@@ -19,6 +19,10 @@ case "${1:-}" in --owning|--scratch-db) INPUT='{}' ;; *) INPUT=$(< /dev/stdin) 2
 _OK_PY_LAZY=1   # never runs Python: skip win-compat's Windows python probes on every call
 source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/lib/common.sh"
 
+# awk reads bytes: under a UTF-8 locale macOS awk aborts on a byte that is not UTF-8 (a Latin-1 script read by
+# _simple_cmds), and that crash refused the command (B14). Every delimiter the parsers look for is ASCII, so bytes lose nothing.
+awk() { LC_ALL=C command awk "$@"; }
+
 # A failed root resolution must not stop the security check — only the heartbeat is best-effort
 ORANGEKIT_HOOK_NAME="security-check"
 # Through orangekit_slashes like every path from Claude Code — on Windows CLAUDE_PROJECT_DIR is C:\…, and a root left in that
@@ -373,6 +377,7 @@ _kg_run() {
         *) _cd_base_v _gbase "${_gcmd%%"$_gt"*}" "${_gcwd:-$ORANGEKIT_ROOT}" || continue
            _norm_v _gabs "$_gbase/${_gt#./}" ;;
       esac
+      [ -d "$_gabs" ] && continue   # a directory is never what a write lands in (B21: the old cwd itself was gated)
       if [ -e "$_gabs" ]; then _knowledge_gate "$(_gate_rel "$_gabs")" 0; else _knowledge_gate "$(_gate_rel "$_gabs")" 1; fi
     done < <(_bash_targets "$_gcmd")
     _kg_flush
@@ -1122,16 +1127,22 @@ _scratch_url() {   # $1 DB name → DATABASE_URL with only the DB name replaced 
   printf '%s' "$DATABASE_URL" | sed -E "s#^([a-z0-9+]+://[^/]*)/[^?]*#\1/$1#"
 }
 _scratch_cmd() {   # $1 segment → is it a segment that runs this mode? (judged by the first token)
-  local t1 rest
-  # t1 is a piece of the segment with its quotes removed, so without this file's path in the quote-stripped segment it cannot match
+  local rest q
+  # The exemption covers the whole segment, so nothing in it may run anything else: a `$(psql "$DATABASE_URL" -c "DROP …")`
+  # argument or a BASH_ENV/ENV file would run against the project DB under the scratch path's pass
+  case "$1" in *'$('*|*'`'*|*'<('*|*'>('*|BASH_ENV=*|*[[:space:]]BASH_ENV=*|ENV=*|*[[:space:]]ENV=*) return 1 ;; esac
+  # Nor an assignment before it: the path needs none, and PATH= (a psql shim) or DATABASE_URL=/PGHOST= (another server) would ride the pass
+  [[ "$1" =~ ^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*= ]] && return 1
   _plain "$1" && { _noquotes "$1"; case "$_NQ" in *"$_SCRATCH_SELF"*) ;; *) return 1 ;; esac; }
-  t1=$(_first_tok "$1")
-  rest=$(printf '%s' "$1" | sed -E 's/^[[:space:]]*//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//')
-  case "$t1" in bash|sh) rest=${rest#* }; t1=$(_first_tok "$rest") ;; esac
-  t1=${t1//\"/}; t1=${t1//\'/}
+  rest=$(printf '%s' "$1" | sed -E 's/^[[:space:]]*//; s/^(bash|sh)[[:space:]]+//')
+  # Matched as a whole, not as a first token: the installed plugin lives under "Application Support", and a token split
+  # at that space never equalled this file, so the promised path was blocked (B13/B18). Unquoted only when the path has no space.
   # Only when it is **this plugin's own file** — so a same-named file the agent made (`./security-check.sh`) cannot earn the exemption
-  [ "$t1" = "$_SCRATCH_SELF" ] || return 1
-  rest=${rest#*security-check.sh}; rest=${rest#\"}; rest=${rest#\'}
+  for q in '"' "'" ''; do
+    [ -z "$q" ] && case "$_SCRATCH_SELF" in *[[:space:]]*) return 1 ;; esac
+    case "$rest" in "$q$_SCRATCH_SELF$q"[[:space:]]*) rest=${rest#"$q$_SCRATCH_SELF$q"}; break ;; esac
+    [ -z "$q" ] && return 1
+  done
   [[ "$rest" =~ ^[[:space:]]+--scratch-db([[:space:]]|$) ]]
 }
 if [ "${1:-}" = "--scratch-db" ]; then
@@ -1160,7 +1171,89 @@ if [ "${1:-}" = "--scratch-db" ]; then
     url|psql)
       _db=$(_full "$_nm"); _known "$_db" || { _say "Not a recorded scratch DB: $_db — run --scratch-db new $_nm first"; exit 2; }
       [ "$_sub" = url ] && { _scratch_url "$_db"; printf '\n'; exit 0; }
-      shift 3; exec psql "$(_scratch_url "$_db")" "$@" ;;
+      shift 3
+      # Best effort, not a security boundary: this scans text, and SQL can assemble text (`select 'drop database x' \gexec`,
+      # DO … EXECUTE) to reach any database or role the scratch credentials can. The boundary is a DB role that cannot reach the
+      # project DB; until the scratch path connects as one, this stops accidental and obvious escapes only.
+      # Only the scratch DB, so allow-lists, not lists of escapes (four review rounds each found a new way past a deny-list):
+      # flags · psql meta-commands are allowed by name, everything else is refused; psqlrc is off (-X). The text scanned is
+      # every -c · -f · stdin · -v/--set value, so a variable cannot carry a meta-command that the scan never saw.
+      _no() { [ ${#_tmps[@]} -eq 0 ] || rm -f "${_tmps[@]}"; _say "Not in the scratch path: $1 would reach past the scratch DB — run that part through the normal path"; exit 2; }
+      _tmps=(); _sql=""; _args=(); _stdin=1
+      trap '[ ${#_tmps[@]} -eq 0 ] || rm -f "${_tmps[@]}"; exit 130' INT TERM   # a killed run leaves no copy of the user's SQL behind
+      while [ $# -gt 0 ]; do
+        _a=$1; shift
+        case "$_a" in
+          -c|-f|-v|-P|-F|-R|-[qXAteabn1xEHs]*[cf])   # -Atc "…" — a cluster may end in the flag that takes the value
+            # psql's getopt gives a value flag the rest of the cluster (-qfc runs the file "c"), so c/f only as the last letter
+            _cl=${_a#-}; _cl=${_cl%?}; case "$_cl" in *[!qXAteabn1xEHs]*) _no "\"$_a\"" ;; esac
+            [ $# -gt 0 ] || _no "\"$_a\" without a value"; _v=$1; shift
+            case "$_a" in
+              *c) _sql="$_sql$_v"$'\n'; _stdin=0 ;;
+              # psql gets a private copy of what was scanned — reading the file again by name would let it change in between
+              # -f - is refused: stdin is scanned only when psql has no -c/-f, and `-f - -c …` had it run unscanned
+              *f) _stdin=0; if [ "$_v" = - ]; then _no "-f - (pipe the SQL in without -f)"; elif [ -f "$_v" ] && [ -r "$_v" ]; then
+                    _t=$(mktemp "${TMPDIR:-/tmp}/orangekit-scratch.XXXXXX") || _no "-f (no temp file for its copy)"
+                    _tmps+=("$_t"); cat "$_v" > "$_t"; _sql="$_sql$(cat "$_t")"$'\n'; _v=$_t
+                  else _no "-f \"$_v\" (not a readable file)"; fi ;;
+              -v) case "$_v" in *'`'*) _no "a backtick in -v (a prompt variable runs it)" ;; esac; _sql="$_sql$_v"$'\n' ;;
+            esac
+            _args+=("$_a" "$_v") ;;
+          --set=*|--variable=*) case "$_a" in *'`'*) _no "a backtick in --set (a prompt variable runs it)" ;; esac; _sql="$_sql${_a#*=}"$'\n'; _args+=("$_a") ;;
+          --pset=*|--field-separator=*|--record-separator=*|--single-transaction|--quiet|--no-psqlrc|--tuples-only|--no-align|--echo-all|--echo-errors|--echo-queries|--expanded|--csv|--html) _args+=("$_a") ;;
+          -[qXAteabn1xEHs]*) case "${_a#-}" in *[!qXAteabn1xEHs]*) _no "\"$_a\"" ;; esac; _args+=("$_a") ;;
+          *) _no "\"$_a\"" ;;
+        esac
+      done
+      _in=""; if [ "$_stdin" = 1 ] && [ ! -t 0 ]; then _in=$(cat; printf x); _in=${_in%x}; _sql="$_sql$_in"; fi
+      # Meta-commands by name. Not allowed, among others: \c \connect (reconnect) · \! \setenv \e (shell, editor) · \i \ir \include
+      # (a file never scanned) · \o \out \w \write (file or pipe) · \gset \getenv \prompt (fill a variable the scan cannot see).
+      # A backslash word anywhere counts, also inside a string ('\c app' assigned with \set) — shortcut: E'\n' in SQL is refused
+      # too, upgrade if real scratch SQL needs E-strings.
+      while IFS= read -r _w; do
+        case "${_w#\\}" in
+          d|d[A-Za-z]*|l|timing|x|pset|a|t|H|f|echo|qecho|warn|set|unset|if|elif|else|endif|q|quit|g|gx|gexec|watch|copy|conninfo|encoding|errverbose|r|p|crosstabview) ;;
+          *) _no "the meta-command \"$_w\"" ;;
+        esac
+      done < <(LC_ALL=C grep -oE '\\[A-Za-z!?]+' <<<"$_sql" || true)
+      # Allowed commands that still take a target: \g/\gx with an argument (a pipe runs a shell, a path writes past the file gates),
+      # \copy … to anything but stdout/pstdout (the allowed `to stdout` is cut out first, so a trailing `-- to stdout` proves
+      # nothing), and a backtick in a meta-command line (psql runs it)
+      if LC_ALL=C grep -qiE '\\gx?([[:space:]]+[^[:space:]\\]|[(|])|\\[a-z].*`' <<<"$_sql" \
+         || awk 'tolower($0) ~ /\\copy[ \t]/ { l = tolower($0) " "; gsub(/[ \t]to[ \t]+p?stdout[ \t;]/, " ", l); if (l ~ /[ \t]to[ \t]/) bad = 1 }
+                 END { exit !bad }' <<<"$_sql"; then
+        _no "an output target in \\g · \\gx · \\copy … to, or a backtick"
+      fi
+      # Unquoted :name interpolation re-reads its value as psql input, so a backslash in it is a meta-command. Only names this
+      # text defines itself (\set · -v · --set, all scanned above) may be interpolated: psql's own variables carry server text
+      # (:LAST_ERROR_MESSAGE from a RAISE). psql interpolates right after a letter too (z:NAME), so only a preceding `:` (a ::cast)
+      # is excluded. :'name' and :"name" quote the value and are left alone. :true/:false/:null are JSON in a literal ('{"a":true}'),
+      # never a psql variable. shortcut: any other :word inside a quoted string is refused too ('a:b'), upgrade if scratch SQL needs it
+      _defs=" $(LC_ALL=C grep -oE '\\set[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' <<<"$_sql" | awk '{print $2}' | tr '\n' ' ')"
+      for _a in ${_args[@]+"${_args[@]}"}; do case "$_a" in [A-Za-z_]*=*) _defs="$_defs ${_a%%=*}" ;; --set=*|--variable=*) _a=${_a#*=}; _defs="$_defs ${_a%%=*}" ;; esac; done
+      while IFS= read -r _w; do
+        case "$_defs " in *" ${_w#:} "*) ;; *) case "${_w#:}" in true|false|null) continue ;; esac; _no "the interpolation \"$_w\" (a variable this command does not set)" ;; esac
+      done < <(LC_ALL=C grep -oE '(^|[^:]):[A-Za-z_][A-Za-z0-9_]*|:\{\?' <<<"$_sql" | LC_ALL=C sed -E 's/^[^:]//' || true)
+      # Server side, best effort only — dynamic SQL (EXECUTE 'co'||'py …', \gexec) can still assemble these, and they need a
+      # superuser: COPY … PROGRAM (a shell on the DB server) · COPY … TO/FROM '<path>' (not \copy) · dblink()/postgres_fdw (a
+      # second connection) · pg_read_file · pg_ls_dir · pg_stat_file · lo_import · lo_export · pg_file_write. Flattened: SQL spans lines.
+      if LC_ALL=C tr '\n' ' ' <<<"$_sql" | LC_ALL=C grep -qiE 'copy[^;]*program|dblink(_[a-z]+)?[[:space:]]*\(|postgres_fdw|(^|[^\\a-z_])copy[^;\\]*[[:space:]](to|from)[[:space:]]+e?'"'"'|pg_read_(binary_)?file|pg_ls_dir|pg_stat_file|lo_import|lo_export|pg_file_write'; then
+        _no "a server-side program, file or connection (COPY PROGRAM or a server path · dblink · server file functions)"
+      fi
+      unset PSQLRC PAGER PSQL_PAGER PSQL_EDITOR EDITOR VISUAL
+      _url=$(_scratch_url "$_db")
+      if [ ${#_tmps[@]} -eq 0 ]; then   # nothing to clean up: psql replaces this process, so a signal or timeout reaches it directly
+        if [ "$_stdin" = 1 ] && [ ! -t 0 ]; then exec psql -X "$_url" ${_args[@]+"${_args[@]}"} <<<"$_in"; fi
+        exec psql -X "$_url" ${_args[@]+"${_args[@]}"}
+      fi
+      # -f copies to remove: psql runs as a child that the traps stop first (a foreground child would defer them until it ends)
+      if [ "$_stdin" = 1 ] && [ ! -t 0 ]; then psql -X "$_url" ${_args[@]+"${_args[@]}"} <<<"$_in" & else psql -X "$_url" ${_args[@]+"${_args[@]}"} </dev/null & fi
+      _pid=$!
+      trap 'kill "$_pid" 2>/dev/null; rm -f "${_tmps[@]}"; exit 143' TERM
+      trap 'kill -INT "$_pid" 2>/dev/null; rm -f "${_tmps[@]}"; exit 130' INT
+      _rc=0; wait "$_pid" || _rc=$?
+      rm -f "${_tmps[@]}"
+      exit "$_rc" ;;
     drop)
       _force=""; for _a in "$@"; do [ "$_a" = --force ] && _force=" WITH (FORCE)"; done
       if [ "$_nm" = --all ]; then _list=$([ -f "$_reg" ] && cat "$_reg"); else _list=$(_full "$_nm"); _known "$_list" || { _say "Not dropping a scratch DB that is not in the record: $_list"; exit 2; }; fi

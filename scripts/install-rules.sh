@@ -10,7 +10,8 @@
 #
 # Idempotent. For a file that is already installed the decision comes from comparing version stamps:
 #   - same version  → skipped
-#   - older version → updated (a user's edits are backed up as .bak)
+#   - older version → updated; the old copy is kept as .bak unless it is byte-for-byte what this installer wrote
+#     (.orangekit/installed.cksum, gitignored — without a record the copy is backed up, as before)
 #   - user edit detected + same version → skipped (project ownership is respected)
 #
 #   --missing-only  A file that already exists is **not checked by version** and is left alone. Only missing ones are installed.
@@ -49,6 +50,15 @@ version_of() { grep -m1 -oE 'orangekit-rule-version: [0-9]+\.[0-9]+\.[0-9]+' "$1
 # a newer or forked plugin, and replacing it would downgrade the project (measured: /orangekit-update on a project a fork
 # set up would have turned backend/fastapi v3.36.0 guides back into v3.14.0). --force still replaces it.
 ver_gt() { awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, "."); for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'; }
+# Checksum of each file as this installer wrote it — so an untouched older card is replaced without a .bak nobody needs (B19)
+MANIFEST="$PROJECT_ROOT/.orangekit/installed.cksum"
+_ck() { cksum < "$1" | awk '{print $1 "-" $2}'; }
+_pristine() { local c; c=$(_ck "$2"); [ -n "$c" ] && [ -f "$MANIFEST" ] && grep -qxF "$1	$c" "$MANIFEST"; }   # $1 key $2 file → unchanged since installed?
+_record() {   # $1 key $2 installed file
+  [ "$DRY" -eq 0 ] || return 0
+  mkdir -p "${MANIFEST%/*}" 2>/dev/null || return 0
+  { [ -f "$MANIFEST" ] && awk -F'\t' -v k="$1" '$1 != k' "$MANIFEST"; printf '%s\t%s\n' "$1" "$(_ck "$2")"; } > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST" || true
+}
 
 
 say 'T1 rule install\n  plugin:  %s\n  project: %s\n\n' "$SRC" "$DST"
@@ -64,7 +74,7 @@ for f in "$SRC"/*.md; do
 
   if [ ! -f "$target" ]; then
     say '  + %-24s (v%s) new\n' "$base" "$sv"
-    [ "$DRY" -eq 0 ] && cp "$f" "$target"
+    if [ "$DRY" -eq 0 ]; then cp "$f" "$target"; _record "rules/$base" "$target"; fi
     installed=$((installed+1))
     continue
   fi
@@ -77,6 +87,7 @@ for f in "$SRC"/*.md; do
   tv=$(version_of "$target"); tv="${tv:-0.0.0}"
   if [ "$sv" = "$tv" ] && [ "$FORCE" -eq 0 ]; then
     say '  = %-24s (v%s) same — skipped\n' "$base" "$tv"
+    cmp -s "$f" "$target" && ! _pristine "rules/$base" "$target" && _record "rules/$base" "$target"   # an install from before the record
     skipped=$((skipped+1))
     continue
   fi
@@ -94,10 +105,13 @@ for f in "$SRC"/*.md; do
     continue
   fi
 
-  say '  ↑ %-24s v%s → v%s (backup: %s.bak)\n' "$base" "$tv" "$sv" "$base"
-  if [ "$DRY" -eq 0 ]; then
-    cp "$target" "$target.bak"
-    cp "$f" "$target"
+  # if-blocks, not `&&` chains: a failed cp must abort under set -e — a swallowed backup failure recorded an edited card as pristine
+  if _pristine "rules/$base" "$target"; then
+    say '  ↑ %-24s v%s → v%s (untouched — no backup)\n' "$base" "$tv" "$sv"
+    if [ "$DRY" -eq 0 ]; then cp "$f" "$target"; _record "rules/$base" "$target"; fi
+  else
+    say '  ↑ %-24s v%s → v%s (backup: %s.bak)\n' "$base" "$tv" "$sv" "$base"
+    if [ "$DRY" -eq 0 ]; then cp "$target" "$target.bak"; cp "$f" "$target"; _record "rules/$base" "$target"; fi
   fi
   updated=$((updated+1))
 done
@@ -115,7 +129,7 @@ if [ -d "$REFSRC" ]; then
     rel="${rf#$REFSRC/}"
     rt="$REFDST/$rel"
     if [ ! -f "$rt" ]; then
-      [ "$DRY" -eq 0 ] && { mkdir -p "$(dirname "$rt")"; cp "$rf" "$rt"; }
+      [ "$DRY" -eq 0 ] && { mkdir -p "$(dirname "$rt")"; cp "$rf" "$rt"; _record "references/$rel" "$rt"; }
       refn=$((refn+1)); continue
     fi
     [ "$MISSING_ONLY" -eq 1 ] && continue
@@ -124,8 +138,8 @@ if [ -d "$REFSRC" ]; then
     if [ "$FORCE" -eq 0 ] && ver_gt "$rtv" "$rsv"; then continue; fi   # newer than the plugin — kept
     if [ "$rsv" != "$rtv" ] || [ "$FORCE" -eq 1 ]; then
       if [ "$DRY" -eq 0 ]; then
-        cmp -s "$rf" "$rt" || cp "$rt" "$rt.bak"
-        cp "$rf" "$rt"
+        cmp -s "$rf" "$rt" || _pristine "references/$rel" "$rt" || cp "$rt" "$rt.bak"
+        cp "$rf" "$rt"; _record "references/$rel" "$rt"
       fi
       refn=$((refn+1))
     fi

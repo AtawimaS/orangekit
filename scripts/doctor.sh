@@ -2130,6 +2130,82 @@ CASES
     _td_run 2 "dropping the project DB from inside the path" - "bash \"$tdself\" --scratch-db psql rb -c \"DROP DATABASE app\""
     _td_run 2 "the path is not the first command" users=rows "echo --scratch-db; psql \"\$DATABASE_URL\" -qc \"DROP TABLE users\""
     _td_run 2 "a different script with the same name" users=rows "bash ./security-check.sh --scratch-db psql rb -c \"DROP TABLE users\""
+    # The psql mode itself: anything that leaves the scratch connection is refused — flags by whitelist (clusters, getopt prefixes),
+    # meta-commands in -c · -f · stdin, psqlrc — while ordinary scratch use still runs
+    mkdir -p "$td/proj/.state"; printf 'orangekit_scratch_rb\n' > "$td/proj/.state/scratch-dbs"
+    printf '\\c app\nDROP TABLE users;\n' > "$td/rc.sql"
+    _tdp() {   # $1 want  $2 stdin text ("" = none)  $3… psql args → psql mode exit code vs want
+      local want=$1 in=$2 code=0 err; shift 2
+      err=$(printf '%s' "$in" | _envi PATH="$td/bin:$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$td/proj" ORANGEKIT_STATE_DIR="$td/proj/.state" FAKE_PSQL_DIR="$td/tbl" \
+        DATABASE_URL="postgres://u:p@localhost:5432/app" PSQLRC="$td/rc.sql" bash "$ROOT/scripts/security-check.sh" --scratch-db psql rb "$@" 2>&1) || code=$?
+      if [ "$code" = "$want" ] && { [ "$want" = 0 ] || grep -q 'Not in the scratch path' <<<"$err"; }; then tdok=$((tdok+1)); else tdbad=$((tdbad+1))
+        bad "security-check --scratch-db psql rb $* → exit $code (expected $want)" "$([ "$want" = 2 ] && echo 'the scratch path would run SQL outside the scratch DB' || echo 'ordinary scratch use is refused')"; fi
+    }
+    _tdp 2 "" -d app -c "DROP TABLE users"
+    _tdp 2 "" -h prod.example -c "DROP TABLE users"
+    _tdp 2 "" -Xd app -c "DROP TABLE users"
+    _tdp 2 "" --db=app -c "DROP TABLE users"
+    _tdp 2 "" -c '\c app' -c "DROP TABLE users"
+    _tdp 2 "" -c '\o |sh'
+    _tdp 2 "" -c "COPY t TO PROGRAM 'psql app'"
+    _tdp 2 "" -f "$td/rc.sql"
+    _tdp 2 "$(printf '\\c app\nDROP TABLE users;\n')" -q
+    _tdp 2 "$(printf 'select 1 \\g (expanded=on) | touch /tmp/x\n')" -q
+    _tdp 2 "$(printf 'copy (select 1) to\nprogram %stouch /tmp/x%s;\n' "'" "'")" -q
+    _tdp 2 "" -c '\o /tmp/out.txt' -c "select 1"
+    _tdp 2 "" -Azc "select 1"
+    _tdp 0 "" -Atc "select 1"
+    _tdp 0 "" -qXc "select 1 \g"
+    _tdp 2 "$(printf ':q\nselect 1;\n')" -At -v 'q=\c app'
+    _tdp 2 ":q" --set='q=\! touch /tmp/x'
+    _tdp 2 "$(printf 'select chr(92)||%sc app%s as q \\gset\n:q\n' "'" "'")" -q
+    _tdp 2 "" -c '\getenv q HOME'
+    printf 'select 1;\n' > "$td/c"; _tdp 2 "" -qfc "select 1"
+    _tdp 2 "" -c "\copy (select 1) to '/tmp/cp.out'"
+    _tdp 2 "" -c "\copy (select 1) to '/tmp/cp.out' -- to stdout"
+    _tdp 2 "$(printf 'do $$ begin raise exception %s%%%s, chr(92)||%sc app%s; end $$;\n:LAST_ERROR_MESSAGE\n' "'" "'" "'" "'")" -q
+    _tdp 2 "" -c 'select :{?x}'
+    _tdp 2 "" -v 'PROMPT1=%`touch /tmp/x`' -c "select 1"
+    _tdp 2 "$(printf '\\c app\n')" -At -f - -c "select 1"
+    _tdp 2 "$(printf 'do $$ begin raise exception %s%%%s, chr(92)||%sc app%s; end $$;\nz:LAST_ERROR_MESSAGE\n' "'" "'" "'" "'")" -q
+    _tdp 0 "" -c "select '{\"a\":true,\"b\":null}'::json, '12:30'::time"
+    _tdp 0 "$(printf '\\set n 5\nselect :n, :%sn%s, %s1%s::int, :m;\n' "'" "'" "'" "'")" -q -v m=1
+    _tdp 0 "" -v m=1 -c 'select 1' -c '\copy t to stdout'
+    _tdp 2 "" -c "COPY t TO '/tmp/x.csv'"
+    _tdp 2 "$(printf 'copy t\nfrom E%s/etc/passwd%s;\n' "'" "'")" -q
+    _tdp 2 "" -Atc "select pg_read_file('/etc/passwd')"
+    _tdp 0 "" -c "COPY t TO STDOUT" -c "\copy t from 'data.csv'"
+    # -f: psql runs the copy that was scanned, and the copy is removed afterwards
+    printf 'select 1;\n' > "$td/ok.sql"; tdtmp=$(ls "${TMPDIR:-/tmp}" 2>/dev/null | grep -c '^orangekit-scratch\.' || true)
+    _tdp 0 "" -q -f "$td/ok.sql"
+    [ "$(ls "${TMPDIR:-/tmp}" 2>/dev/null | grep -c '^orangekit-scratch\.' || true)" = "$tdtmp" ] && tdok=$((tdok+1)) \
+      || { tdbad=$((tdbad+1)); bad "security-check --scratch-db psql -f left its temp copy behind"; }
+    _tdp 0 "" -q -v ON_ERROR_STOP=1 -c '\copy t TO STDOUT' -c '\dt+' -c '\timing on'
+    _tdp 0 "" -qX -P pager=off -A -t -c "-- --host note"
+    _tdp 0 "$(printf 'BEGIN;\nDELETE FROM point_entries;\nCOMMIT;\n')" -q -v ON_ERROR_STOP=1
+    # The pass covers the whole segment — nothing in it may run another command against the project DB
+    _td_run 2 "a command substitution inside the path runs on the project DB" users=rows "bash \"$tdself\" --scratch-db psql rb -c \"select 1\" \$(psql \"\$DATABASE_URL\" -c \"DROP TABLE users\")"
+    _td_run 2 "BASH_ENV before the path runs another file first" users=rows "BASH_ENV=/tmp/x.sh bash \"$tdself\" --scratch-db psql rb -c \"DROP TABLE users\""
+    _td_run 2 "PATH before the path can swap in another psql" users=rows "PATH=/tmp/evil:\$PATH bash \"$tdself\" --scratch-db psql rb -c \"DROP TABLE users\""
+    _td_run 2 "DATABASE_URL before the path points it at another server" users=rows "DATABASE_URL=postgres://u@prod/app bash \"$tdself\" --scratch-db psql rb -c \"DROP TABLE users\""
+    # The installed plugin lives under "Application Support" — a first token split at that space never matched (B13/B18)
+    ln -s "$ROOT" "$td/plugin root" 2>/dev/null && {
+      tdsp="$td/plugin root/scripts/security-check.sh"
+      ROOT="$td/plugin root" _td_run 0 "DROP TABLE inside the path, plugin path with a space [B13/B18]" users=rows "bash \"$tdsp\" --scratch-db psql rb -c \"DROP TABLE users\""
+      ROOT="$td/plugin root" _td_run 2 "the same path unquoted runs another file" users=rows "bash $tdsp --scratch-db psql rb -c \"DROP TABLE users\""
+      ROOT="$td/plugin root" _td_run 0 "single-quoted plugin path with a space" users=rows "bash '$tdsp' --scratch-db psql rb -c \"DROP TABLE users\""
+      ROOT="$td/plugin root" _td_run 2 "a character glued to the quoted path is another file" users=rows "bash \"$tdsp\"x --scratch-db psql rb -c \"DROP TABLE users\""
+    }
+    # A script with a byte that is not UTF-8, read under a UTF-8 locale: macOS awk aborted and the command was refused (B14)
+    # Any UTF-8 locale this machine has (en_US.UTF-8 on macOS, C.UTF-8 on most Linux) — under C the test would prove nothing
+    tdloc=$(locale -a 2>/dev/null | grep -iE '^(en_US|C)\.utf-?8$' | head -1 || true)
+    [ -n "$tdloc" ] || warn "no UTF-8 locale on this machine" "the non-UTF-8 byte case (B14) runs under C and proves nothing here"
+    printf '#!/bin/bash\necho caf\351\n' > "$td/latin1.sh"
+    tdcode=0; tderr=$(jq -nc --arg c "bash $td/latin1.sh" '{tool_name:"Bash",tool_input:{command:$c}}' \
+      | _envi PATH="$PATH" HOME="$HOME" LC_ALL="${tdloc:-C}" CLAUDE_PROJECT_DIR="$td/proj" ORANGEKIT_STATE_DIR="$td/proj/.state" \
+          bash "$ROOT/scripts/security-check.sh" 2>&1 >/dev/null) || tdcode=$?
+    if [ "$tdcode" = 0 ] && ! grep -q "ERROR line" <<<"$tderr"; then tdok=$((tdok+1)); else tdbad=$((tdbad+1))
+      bad "security-check: a non-UTF-8 script byte → exit $tdcode (expected 0) [B14]" "$(printf '%s' "$tderr" | head -1)"; fi
     [ "$tdbad" -eq 0 ] && ok "security-check: shell-value expansion · table measurement $tdok/$tdok — only provable scratch objects open; project, system and unmeasurable stay blocked"
   else
     warn "temp directory or jq missing" "the boundary of shell-value expansion and table measurement is unproven"
@@ -2863,6 +2939,32 @@ FXP
     dbo=$(printf '{}' | ORANGEKIT_STATE_DIR="$dp/.st" CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$dp" bash "$ROOT/scripts/session-brief.sh" 2>/dev/null || true)
     if grep -q '1 T1 rule cards are on an old version' <<< "$dbo"; then ok "one newer + one older card → 1 reported (a newer copy is kept, not nagged about)"
     else bad "drift count wrong: $(grep -o '[0-9]* T1 rule cards are on an old version' <<< "$dbo" || echo none)" "a card newer than the plugin's would be nagged about every session"; fi
+    rm -rf "$dp"
+  fi
+  # B19: an older card nobody edited is replaced without a .bak; an edited one keeps its .bak
+  dp=$(mktemp -d 2>/dev/null) || dp=""
+  if [ -n "$dp" ]; then
+    mkdir -p "$dp/old" "$dp/p"; cp -R "$ROOT/rules" "$ROOT/references" "$dp/old/" 2>/dev/null
+    for f in lessons security; do sed 's/orangekit-rule-version: [0-9.]*/orangekit-rule-version: 0.0.1/' "$dp/old/rules/$f.md" > "$dp/x" && mv "$dp/x" "$dp/old/rules/$f.md"; done
+    ( cd "$dp/p" && git init -q ) >/dev/null 2>&1
+    CLAUDE_PROJECT_DIR="$dp/p" CLAUDE_PLUGIN_ROOT="$dp/old" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+    printf '\n# team note\n' >> "$dp/p/.claude/rules/security.md"
+    CLAUDE_PROJECT_DIR="$dp/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+    if [ ! -e "$dp/p/.claude/rules/lessons.md.bak" ] && [ -f "$dp/p/.claude/rules/security.md.bak" ]; then ok "update: an untouched older card leaves no .bak, an edited one keeps it [B19]"
+    else bad "update .bak: untouched=$([ -e "$dp/p/.claude/rules/lessons.md.bak" ] && echo bak || echo none) edited=$([ -f "$dp/p/.claude/rules/security.md.bak" ] && echo bak || echo none)" "expected none / bak — every update leaves .bak files a person must inspect"; fi
+    # …and a backup that cannot be written stops the run instead of recording the edited card as untouched
+    dp2=$(mktemp -d 2>/dev/null) || dp2=""
+    if [ -n "$dp2" ]; then
+      mkdir -p "$dp2/p"; ( cd "$dp2/p" && git init -q ) >/dev/null 2>&1
+      CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$dp/old" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
+      printf '\n# team note\n' >> "$dp2/p/.claude/rules/security.md"; ln -s "$dp2/missing/dir/x" "$dp2/p/.claude/rules/security.md.bak"   # a dangling link: cp fails even as root (a read-only file does not)
+      CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1 && dbo=0 || dbo=$?
+      rm -f "$dp2/p/.claude/rules/security.md.bak"
+      CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1 || true
+      if [ "$dbo" != 0 ] && grep -q '# team note' "$dp2/p/.claude/rules/security.md.bak" 2>/dev/null; then ok "  …a backup that cannot be written stops the update; the edit still gets its .bak next run"
+      else bad "a failed backup was swallowed (exit $dbo)" "the edited card is recorded as untouched and the next update replaces it without a .bak"; fi
+      rm -rf "$dp2"
+    fi
     rm -rf "$dp"
   fi
 
