@@ -1124,7 +1124,7 @@ _SCRATCH_SELF="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." &&
 _SCRATCH_HINT="If it is a scratch DB for verification, use the dedicated path — it always passes: bash \"$_SCRATCH_SELF\" --scratch-db new <name> [--template <DB>] → --scratch-db psql <name> -c \"…\" → --scratch-db drop <name>"
 _scratch_registry() { [ -n "${ORANGEKIT_ROOT:-}" ] && printf '%s/scratch-dbs' "$(orangekit_state_dir)"; }
 _scratch_url() {   # $1 DB name → DATABASE_URL with only the DB name replaced (the query string is kept)
-  printf '%s' "$DATABASE_URL" | sed -E "s#^([a-z0-9+]+://[^/]*)/[^?]*#\1/$1#"
+  printf '%s' "$DATABASE_URL" | sed -E "s#^([A-Za-z][A-Za-z0-9+.-]*://[^/?]*)(/[^?]*)?#\1/$1#"
 }
 _scratch_cmd() {   # $1 segment → is it a segment that runs this mode? (judged by the first token)
   local rest q
@@ -1153,9 +1153,113 @@ if [ "${1:-}" = "--scratch-db" ]; then
   [ -n "$_reg" ] || { _say "Undecidable: the project root was not found, so no record can be kept — not creating a scratch DB"; exit 2; }
   [ -n "${DATABASE_URL:-}" ] || { _say "Undecidable: DATABASE_URL is not set, so it is unknown which server to create on — not creating"; exit 2; }
   command -v psql >/dev/null 2>&1 || { _say "Undecidable: psql is not installed"; exit 2; }
+  # Only a scheme://…/db URL can be pointed at the scratch DB. A key=value string, or a dbname=/service= in the query, would
+  # keep the project DB — and the scratch path would then run (and hand objects over) there
+  [[ "$DATABASE_URL" =~ ^[A-Za-z][A-Za-z0-9+.-]*:// ]] || { _say "Undecidable: DATABASE_URL is not a scheme://…/db URL, so it cannot be pointed at a scratch DB — not running"; exit 2; }
+  # libpq decodes %xx in a key and splits on ; too, so anything that could spell dbname/service is refused, not just the plain key
+  case "${DATABASE_URL#*\?}" in "$DATABASE_URL") ;; *%*|*\;*|*[Dd][Bb][Nn][Aa][Mm][Ee]*|*[Ss][Ee][Rr][Vv][Ii][Cc][Ee]*) _say "Undecidable: the query of DATABASE_URL could name another DB (dbname=, service=, an encoded key) and override the scratch DB — not running"; exit 2 ;; esac
   _full() { printf '%s%s' "$_SCRATCH_PREFIX" "$1"; }
   _known() { [ -f "$_reg" ] && grep -qxF -- "$1" "$_reg"; }
   _valid() { [[ "$1" =~ ^[a-z][a-z0-9_]{0,39}$ ]]; }
+  # ── The scratch role: the boundary the text scan below cannot be ──────────────────────────────────────────────
+  # Each scratch DB is owned by a per-project login role that is not a superuser and cannot create roles or databases, and
+  # psql/url connect as that role. Dynamic SQL from the scratch connection (`select 'drop database app' \gexec`) then fails on
+  # the server: the role owns nothing outside its scratch DBs. The project credentials only create, hand over and drop.
+  # Cluster-wide name, so per project (two projects on one server must not reset each other's password). "<role> <password>" is
+  # kept in the state dir, mode 600. A server where the project user cannot create roles falls back to the project credentials
+  # with a warning; DBs made that way are left out of `scratch-dbs.role`, so they keep connecting as before.
+  _rolef="$(dirname "$_reg")/scratch-role"; _rolereg="$_reg.role"
+  # The name is made once and then read back from the file: host and path only seed it (devcontainers share paths), so a
+  # renamed laptop keeps reaching the scratch DBs it made
+  _role=$([ -f "$_rolef" ] && awk 'NR == 1 {print $1}' "$_rolef")
+  [[ "$_role" =~ ^orangekit_sr_[0-9]+$ ]] || _role=$(printf 'orangekit_sr_%s' "$(printf '%s %s' "$(uname -n 2>/dev/null)" "$ORANGEKIT_ROOT" | cksum | awk '{print $1}')")
+  _rolepw() { [ -f "$_rolef" ] && awk -v r="$_role" '$1 == r {print $2}' "$_rolef"; }
+  _ensure_role() {   # create or reset the role, make the project user a member (to hand objects over and to drop) → 0 when usable
+    local pw d; pw=$(_rolepw); [ -n "$pw" ] || pw=$(od -An -tx1 -N16 /dev/urandom 2>/dev/null | tr -d ' \n')
+    [ "${#pw}" -eq 32 ] || return 1
+    # the password reaches psql on stdin, not in its argv (ps)
+    { printf '\\set r %s\n\\set pw %s\n' "$_role" "$pw"; cat <<'SQL'; } | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 >&2 || return 1
+SELECT format('CREATE ROLE %I LOGIN', :'r') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'r') \gexec
+SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'r', :'pw') \gexec
+SELECT format('GRANT %I TO CURRENT_USER', :'r') WHERE NOT pg_has_role(current_user, :'r', 'USAGE') \gexec
+SET orangekit.scratch_role TO :'r';
+DO $check$ BEGIN   -- checked, not set: before PG16 naming NOREPLICATION/NOBYPASSRLS in ALTER ROLE needs a superuser
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_setting('orangekit.scratch_role')
+             AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'the scratch role % has elevated attributes', current_setting('orangekit.scratch_role');
+  END IF;
+END $check$;
+SQL
+    d=$(dirname "$_rolef"); mkdir -p "$d" && (umask 077; printf '%s %s\n' "$_role" "$pw" > "$_rolef")
+    [ -e "$d/.gitignore" ] || printf '*\n' > "$d/.gitignore"   # local state, password included: never committed, initialised project or not
+  }
+  # Objects a --template copy brings along still belong to the project user, so the role could not DROP its own tables.
+  # Hand over what the project user owns in the copy — schemas · tables, partitions, views, foreign tables, standalone sequences ·
+  # composite, enum, domain and range types · routines · collations · statistics — never extension members. What is left
+  # (operators, FDW servers, large objects …) is counted in a warning. The copy is checked by name first: a URL that did not
+  # point where it was meant to must never hand the project DB's objects over.
+  _handover() {   # $1 scratch DB
+    { printf '\\set r %s\n\\set d %s\n' "$_role" "$1"; cat <<'SQL'; } | psql "$(_scratch_url "$1")" -X -q -v ON_ERROR_STOP=1 >&2
+SET orangekit.scratch_role TO :'r';
+SET orangekit.scratch_db TO :'d';
+DO $handover$
+DECLARE o record; n int; ro text := current_setting('orangekit.scratch_role'); me oid := (SELECT oid FROM pg_roles WHERE rolname = current_user);
+  sys oid[] := ARRAY(SELECT oid FROM pg_namespace WHERE nspname LIKE 'pg\_%' OR nspname = 'information_schema');
+BEGIN
+  IF current_database() <> current_setting('orangekit.scratch_db') THEN
+    RAISE EXCEPTION 'connected to %, not the scratch DB % — nothing handed over', current_database(), current_setting('orangekit.scratch_db');
+  END IF;
+  FOR o IN SELECT nspname FROM pg_namespace WHERE nspowner = me AND oid <> ALL (sys) LOOP
+    EXECUTE format('ALTER SCHEMA %I OWNER TO %I', o.nspname, ro);
+  END LOOP;
+  -- the dependency exclusion is for sequences only (serial/identity follow their table); a partition depends on its parent too
+  FOR o IN SELECT c.oid::regclass AS n, c.relkind AS k FROM pg_class c
+           WHERE c.relowner = me AND c.relkind IN ('r','p','v','m','f','S','c') AND c.relnamespace <> ALL (sys)
+             AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid
+                             AND (d.deptype = 'e' OR (c.relkind = 'S' AND d.deptype IN ('a','i')))) LOOP
+    EXECUTE format('ALTER %s %s OWNER TO %I', CASE o.k WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE'
+                   WHEN 'S' THEN 'SEQUENCE' WHEN 'c' THEN 'TYPE' ELSE 'TABLE' END, o.n, ro);
+  END LOOP;
+  FOR o IN SELECT p.oid::regprocedure AS n, p.prokind AS k FROM pg_proc p
+           WHERE p.proowner = me AND p.pronamespace <> ALL (sys)
+             AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e') LOOP
+    EXECUTE format('ALTER %s %s OWNER TO %I', CASE o.k WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' ELSE 'FUNCTION' END, o.n, ro);
+  END LOOP;
+  FOR o IN SELECT t.oid::regtype AS n, t.typtype AS k FROM pg_type t
+           WHERE t.typowner = me AND t.typtype IN ('e','d','r') AND t.typnamespace <> ALL (sys)
+             AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e') LOOP
+    EXECUTE format('ALTER %s %s OWNER TO %I', CASE o.k WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END, o.n, ro);
+  END LOOP;
+  FOR o IN SELECT format('%I.%I', s.nspname, c.collname) AS n FROM pg_collation c JOIN pg_namespace s ON s.oid = c.collnamespace
+           WHERE c.collowner = me AND c.collnamespace <> ALL (sys)
+             AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_collation'::regclass AND d.objid = c.oid AND d.deptype = 'e') LOOP
+    EXECUTE format('ALTER COLLATION %s OWNER TO %I', o.n, ro);
+  END LOOP;
+  FOR o IN SELECT format('%I.%I', s.nspname, x.stxname) AS n FROM pg_statistic_ext x JOIN pg_namespace s ON s.oid = x.stxnamespace
+           WHERE x.stxowner = me LOOP
+    EXECUTE format('ALTER STATISTICS %s OWNER TO %I', o.n, ro);
+  END LOOP;
+  SELECT count(*) INTO n FROM (
+      SELECT 'pg_operator'::regclass AS c, oid FROM pg_operator WHERE oprowner = me AND oprnamespace <> ALL (sys)
+      UNION ALL SELECT 'pg_foreign_server'::regclass, oid FROM pg_foreign_server WHERE srvowner = me
+      UNION ALL SELECT 'pg_largeobject'::regclass, oid FROM pg_largeobject_metadata WHERE lomowner = me
+      UNION ALL SELECT 'pg_opclass'::regclass, oid FROM pg_opclass WHERE opcowner = me AND opcnamespace <> ALL (sys)
+      UNION ALL SELECT 'pg_ts_config'::regclass, oid FROM pg_ts_config WHERE cfgowner = me AND cfgnamespace <> ALL (sys)) x
+    WHERE NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = x.c AND d.objid = x.oid AND d.deptype = 'e');
+  IF n > 0 THEN
+    RAISE WARNING '% object(s) in the copy (operators, FDW servers, large objects, operator classes, text search configs) still belong to the project user; the scratch role cannot alter or drop them', n;
+  END IF;
+END $handover$;
+SQL
+  }
+  _conn_url() {   # $1 scratch DB → its URL as the scratch role when the DB was made with it, else as before
+    local pw
+    if [ -f "$_rolereg" ] && grep -qxF -- "$1" "$_rolereg"; then
+      # a role DB without its password must not quietly fall back to the project credentials
+      pw=$(_rolepw); [ -n "$pw" ] || { _say "The scratch role's password ($_rolef) is gone — drop $1 and create it again"; return 1; }
+      _scratch_url "$1" | sed -E "s#^([A-Za-z][A-Za-z0-9+.-]*://)([^@/?]*@)?#\1$_role:$pw@#"
+    else _scratch_url "$1"; fi
+  }
   case "$_sub" in
     list) [ -f "$_reg" ] && cat "$_reg"; exit 0 ;;
     new)
@@ -1165,16 +1269,23 @@ if [ "${1:-}" = "--scratch-db" ]; then
         _tpl=${5:-}; [[ "$_tpl" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { _say "The --template name is not valid"; exit 2; }
       fi
       grep <<<"$(_project_db_names)" -qxF -- "$_db" && { _say "Not creating — same name as a project DB: $_db"; exit 2; }
-      psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$_db\"${_tpl:+ TEMPLATE \"$_tpl\"}" >&2 || exit 1
+      if _ensure_role; then _owner=" OWNER \"$_role\""
+      else _owner=""; _say "Warning: no scratch role (the project user cannot create roles here) — this scratch DB uses the project credentials, so SQL run in it can still reach other databases"; fi
+      psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$_db\"$_owner${_tpl:+ TEMPLATE \"$_tpl\"}" >&2 || exit 1
       mkdir -p "$(dirname "$_reg")" && { _known "$_db" || printf '%s\n' "$_db" >> "$_reg"; }
-      _scratch_url "$_db"; printf '\n'; exit 0 ;;
+      if [ -n "$_owner" ]; then
+        # recorded only once the copy is the role's: a failed hand-over leaves a DB the role could not work in
+        if [ -z "$_tpl" ] || _handover "$_db"; then { grep -qxF -- "$_db" "$_rolereg" 2>/dev/null || printf '%s\n' "$_db" >> "$_rolereg"; }
+        else _say "Warning: the template's objects could not be handed to the scratch role — this scratch DB uses the project credentials"; fi
+      fi
+      _conn_url "$_db" || exit 2; printf '\n'; exit 0 ;;
     url|psql)
       _db=$(_full "$_nm"); _known "$_db" || { _say "Not a recorded scratch DB: $_db — run --scratch-db new $_nm first"; exit 2; }
-      [ "$_sub" = url ] && { _scratch_url "$_db"; printf '\n'; exit 0; }
+      [ "$_sub" = url ] && { _conn_url "$_db" || exit 2; printf '\n'; exit 0; }
       shift 3
       # Best effort, not a security boundary: this scans text, and SQL can assemble text (`select 'drop database x' \gexec`,
-      # DO … EXECUTE) to reach any database or role the scratch credentials can. The boundary is a DB role that cannot reach the
-      # project DB; until the scratch path connects as one, this stops accidental and obvious escapes only.
+      # DO … EXECUTE). The boundary is the scratch role above, which owns nothing outside its scratch DBs; the scan stops the
+      # client-side escapes (reconnecting, running a program, writing files) and is all there is on a fallback DB.
       # Only the scratch DB, so allow-lists, not lists of escapes (four review rounds each found a new way past a deny-list):
       # flags · psql meta-commands are allowed by name, everything else is refused; psqlrc is off (-X). The text scanned is
       # every -c · -f · stdin · -v/--set value, so a variable cannot carry a meta-command that the scan never saw.
@@ -1241,7 +1352,7 @@ if [ "${1:-}" = "--scratch-db" ]; then
         _no "a server-side program, file or connection (COPY PROGRAM or a server path · dblink · server file functions)"
       fi
       unset PSQLRC PAGER PSQL_PAGER PSQL_EDITOR EDITOR VISUAL
-      _url=$(_scratch_url "$_db")
+      _url=$(_conn_url "$_db") || exit 2
       if [ ${#_tmps[@]} -eq 0 ]; then   # nothing to clean up: psql replaces this process, so a signal or timeout reaches it directly
         if [ "$_stdin" = 1 ] && [ ! -t 0 ]; then exec psql -X "$_url" ${_args[@]+"${_args[@]}"} <<<"$_in"; fi
         exec psql -X "$_url" ${_args[@]+"${_args[@]}"}
@@ -1264,8 +1375,15 @@ if [ "${1:-}" = "--scratch-db" ]; then
         grep <<<"$(_project_db_names)" -qxF -- "$_db" && { _say "Not dropping a project DB: $_db"; _rc=2; continue; }
         if psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$_db\"$_force" >&2; then
           grep -vxF -- "$_db" "$_reg" > "$_reg.tmp" 2>/dev/null; mv "$_reg.tmp" "$_reg"; printf 'dropped %s\n' "$_db"
+          [ -f "$_rolereg" ] && { grep -vxF -- "$_db" "$_rolereg" > "$_rolereg.tmp" 2>/dev/null; mv "$_rolereg.tmp" "$_rolereg"; }
         else _rc=1; fi
       done <<< "$_list"
+      # every scratch DB gone → the role goes too (it owns nothing else); a failure only warns, the next `new` reuses it
+      if [ "$_nm" = --all ] && [ "$_rc" = 0 ] && [ -f "$_rolef" ]; then
+        if printf '\\set r %s\nSELECT format(%s, :%sr%s) WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :%sr%s) \\gexec\n' "$_role" "'DROP ROLE %I'" "'" "'" "'" "'" \
+             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 >&2; then rm -f "$_rolef" "$_rolereg"; printf 'dropped role %s\n' "$_role"
+        else _say "Warning: the scratch role $_role could not be dropped; the next --scratch-db new reuses it"; fi
+      fi
       exit "$_rc" ;;
     *) _say "Unknown subcommand: $_sub"; exit 2 ;;
   esac

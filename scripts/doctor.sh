@@ -2693,6 +2693,20 @@ FXP
     fi
   fi
 
+  # ── scratch role on a real PostgreSQL — the boundary the text scan cannot be; needs initdb, so skipped where there is none ──
+  sec "scratch role (real PostgreSQL)"
+  local pgb="" pgd pgo
+  for pgd in "$(dirname "$(command -v initdb 2>/dev/null || echo /nonexistent/x)")" /usr/lib/postgresql/*/bin /opt/homebrew/opt/postgresql*/bin /usr/local/opt/postgresql*/bin; do
+    [ -x "$pgd/initdb" ] && [ -x "$pgd/pg_ctl" ] && [ -x "$pgd/psql" ] && { pgb=$pgd; break; }
+  done
+  if [ -z "$pgb" ] || [ "$(id -u 2>/dev/null)" = 0 ]; then
+    warn "scratch role not proven here" "$([ -z "$pgb" ] && echo 'no initdb/pg_ctl found' || echo 'running as root, initdb refuses') — the scratch-DB boundary is unproven on this machine"
+  elif pgo=$(bash "$ROOT/scripts/fixtures/scratch-role-pg.sh" "$ROOT" "$pgb" 2>&1); then
+    ok "scratch role: $(printf '%s\n' "$pgo" | tail -1) ($pgb)"
+  else
+    bad "scratch role: $(printf '%s\n' "$pgo" | tail -1)" "$(printf '%s\n' "$pgo" | grep '^FAIL' | head -3 | cut -c1-160)"
+  fi
+
   # ── hook edge cases (transcript · gate order · Windows paths) — cases a one-line JSON fixture cannot express ──
   sec "hook edge cases (unparseable transcript · gate order · cost per target · Windows path · -c payload)"
   local hec_out

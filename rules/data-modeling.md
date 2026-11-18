@@ -11,7 +11,7 @@ paths:
   - "alembic/**"
   - "**/*.sql"
 ---
-<!-- orangekit-rule-version: 3.43.0 -->
+<!-- orangekit-rule-version: 3.44.0 -->
 
 # Data Modeling Card
 
@@ -192,6 +192,7 @@ Mandatory checks when creating a new table:
 
 **Scratch DB for verification** — to try a migration on an empty DB or a copy, create it with `<plugin-root>/scripts/security-check.sh --scratch-db new <name> [--template <DB>]` (it prints the connection URL), work in it with `--scratch-db psql <name> …`, and remove it with `--scratch-db drop <name>|--all`.
 **This is the one form the safeguard always lets through** — dropping or running DML on a scratch DB you made by hand is blocked unless it is proven to be a scratch DB.
+The scratch DB belongs to a per-project login role that owns nothing else, and the printed URL connects as that role — so SQL run in that session cannot drop or alter the project DB, other databases or roles. (The role can still connect to other databases and call what `PUBLIC` may run there — no more than the project credentials already allow.) It needs a `scheme://…/db` `DATABASE_URL` and a project user that may create roles (`CREATEROLE`, as on RDS, Supabase or Neon); without the role, `new` warns and the scratch DB uses the project credentials, guarded by text checks only. The role cannot `CREATE EXTENSION` for untrusted extensions (PostGIS and the like): copy a template that already has them. `drop --all` removes the role too.
 
 ---
 
