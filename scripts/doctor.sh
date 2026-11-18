@@ -2971,9 +2971,11 @@ FXP
     if [ -n "$dp2" ]; then
       mkdir -p "$dp2/p"; ( cd "$dp2/p" && git init -q ) >/dev/null 2>&1
       CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$dp/old" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1
-      printf '\n# team note\n' >> "$dp2/p/.claude/rules/security.md"; ln -s "$dp2/missing/dir/x" "$dp2/p/.claude/rules/security.md.bak"   # a dangling link: cp fails even as root (a read-only file does not)
-      CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1 && dbo=0 || dbo=$?
-      rm -f "$dp2/p/.claude/rules/security.md.bak"
+      printf '\n# team note\n' >> "$dp2/p/.claude/rules/security.md"
+      # a cp that cannot write a .bak — a read-only file stops no root, and Git Bash's ln -s makes a copy, so the failure is a shim
+      mkdir -p "$dp2/bin"; printf '#!/bin/sh\ncase "$2" in *.bak) echo "cp: cannot write $2" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$(command -v cp)" > "$dp2/bin/cp"; chmod +x "$dp2/bin/cp"
+      PATH="$dp2/bin:$PATH" CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1 && dbo=0 || dbo=$?
+      rm -f "$dp2/p/.claude/rules/security.md.bak"   # nothing should be there; the next run writes it
       CLAUDE_PROJECT_DIR="$dp2/p" CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/scripts/install-rules.sh" --quiet >/dev/null 2>&1 || true
       if [ "$dbo" != 0 ] && grep -q '# team note' "$dp2/p/.claude/rules/security.md.bak" 2>/dev/null; then ok "  …a backup that cannot be written stops the update; the edit still gets its .bak next run"
       else bad "a failed backup was swallowed (exit $dbo)" "the edited card is recorded as untouched and the next update replaces it without a .bak"; fi
