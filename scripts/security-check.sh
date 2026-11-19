@@ -102,17 +102,133 @@ _has_test_runner() {   # routing P4's "a repo that has a test runner"
   return 1
 }
 _bash_targets() {   # $1 command → the file paths it writes (one per line). Heredoc bodies · /dev/* · variable or substitution paths are left out
-  local t
-  t=$(printf '%s\n' "$1" | awk '
-      hd != "" { x=$0; sub(/^[\t ]+/, "", x); if (x == hd) hd = ""; next }
-      { print
-        if (match($0, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*/)) {
-          hd = substr($0, RSTART, RLENGTH); sub(/^<<-?[ \t]*["\047]?/, "", hd) } }' \
-      | sed -E 's/[0-9]*>{1,2}[[:space:]]*\/dev\/null//g; s/&>[[:space:]]*\/dev\/null//g; s/[0-9]*>&[0-9]+//g')
-  { grep <<<"$t" -oE '(^|[^-<>=0-9A-Za-z_])>{1,2}[[:space:]]*[^[:space:];&|<>()]+' | sed -E 's/^.?>{1,2}[[:space:]]*//' || true
-    grep <<<"$t" -oE '(^|[;&|[:space:]])tee([[:space:]]+-a)?[[:space:]]+[^-[:space:];&|<>()][^[:space:];&|<>()]*' | awk '{print $NF}' || true
-    grep <<<"$t" -oE "(^|[;&|[:space:]])sed[[:space:]]+(-[A-Za-z]*i[^[:space:]]*|--in-place[^[:space:]]*)([[:space:]]+(''|\"\"))?([[:space:]]+-e)?[[:space:]]+('[^']*'|\"[^\"]*\"|[^[:space:]]+)[[:space:]]+[^-[:space:];&|<>()][^[:space:];&|<>()]*" | awk '{print $NF}' || true
-  } | sed -E "s/^[\"']//; s/[\"']$//" | { grep -vE '^(/dev/|&)|[$`~*]' || true; } | sort -u
+  # A small shell tokenizer (B23): text inside '…' "…" $'…', heredoc bodies, comments, $(( )) and [[ ]] never yield a target —
+  # a regex over the raw text read `b[3*i]>230` in `python3 -c "…"` as a redirect and a sed expression as a file.
+  # Targets: the word after > >> >| &> 2> >&file · `tee` operands · the file operands of an in-place `sed` (never its script).
+  # A word holding a substitution gets a `$`, so the filter below drops it like a variable path.
+  printf '%s\n' "$1" | awk 'BEGIN { RS = "\001" }
+    { s = s (NR > 1 ? "\001" : "") $0 }
+    function push(o) { k++; op[k] = o; q[k] = ""; w[k] = ""; ws[k] = 0; nw[k] = 0; pr[k] = 0; ad[k] = 0; dbr[k] = 0 }
+    function pop() { if (k > 0) { endc(k); k-- } }
+    function endw(k,   v) {
+      if (!ws[k]) return
+      v = w[k]; w[k] = ""; ws[k] = 0
+      if (pr[k] == 1) { pr[k] = 0; if (v != "") print v; return }
+      if (pr[k] == 2) { pr[k] = 0; return }   # the operand of < or <<<
+      if (v == "[[" && nw[k] == 0) dbr[k] = 1
+      if (v == "]]") dbr[k] = 0
+      cw[k, ++nw[k]] = v
+    }
+    function endc(k,   j, a, c, b, wrap, inpl, sg, st, eo, m, ch, rest) {
+      endw(k); pr[k] = 0; dbr[k] = 0
+      c = 0; wrap = 0
+      for (j = 1; j <= nw[k]; j++) {
+        a = cw[k, j]
+        if (a ~ /^[A-Za-z_][A-Za-z0-9_]*=/ || a ~ /^(!|\{|if|then|do|else|elif|while|until)$/) continue
+        if (a ~ /^(sudo|env|command|nohup|time|exec|xargs|nice|stdbuf)$/) { wrap = 1; continue }
+        if (wrap && a ~ /^-/) continue
+        c = j; break
+      }
+      if (c) {
+        b = cw[k, c]; sub(/.*\//, "", b)
+        if (b == "tee") { for (j = c + 1; j <= nw[k]; j++) if (cw[k, j] !~ /^-/ && cw[k, j] != "") print cw[k, j] }
+        else if (b == "sed" || b == "gsed") {
+          inpl = 0; sg = 0; st = 0; eo = 0
+          for (j = c + 1; j <= nw[k]; j++) {
+            a = cw[k, j]
+            if (!eo && a == "--") { eo = 1; continue }
+            if (!eo && a ~ /^--./) {
+              if (a ~ /^--in-place/) inpl = 1
+              else if (a ~ /^--(expression|file)=/) sg = 1
+              else if (a == "--expression" || a == "--file") { sg = 1; j++ }
+              continue
+            }
+            if (!eo && a ~ /^-./) {
+              for (m = 2; m <= length(a); m++) {
+                ch = substr(a, m, 1); rest = substr(a, m + 1)
+                # BSD `-i ""` / `-i .bak` takes its suffix as the next word; GNU -i takes none (a script never starts with a dot)
+                if (ch == "i") { inpl = 1; if (rest == "" && j < nw[k] && (cw[k, j + 1] == "" || cw[k, j + 1] ~ /^\.[^\/]*$/)) j++; break }
+                if (ch == "e" || ch == "f") { sg = 1; if (rest == "") j++; break }
+                if (ch == "l") { if (rest == "") j++; break }
+              }
+              continue
+            }
+            if (!sg && !st) { st = 1; continue }   # the first operand is the script when no -e/-f gave one
+            if (inpl && a != "" && a != "-") print a
+          }
+        }
+      }
+      nw[k] = 0
+    }
+    function skiphd(i,   p, e, l, h) {   # i = the newline after the line that opened the heredocs → the index of the last delimiter line end
+      h = 1; p = i + 1
+      while (h <= nh && p <= n) {
+        e = index(substr(s, p), "\n"); l = e ? substr(s, p, e - 1) : substr(s, p)
+        if (hdash[h]) sub(/^\t+/, "", l)
+        if (l == hd[h]) h++
+        p = e ? p + e : n + 1
+      }
+      nh = 0
+      return p - 1
+    }
+    END {
+      n = length(s); k = 0; op[0] = ""; q[0] = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1); d = substr(s, i + 1, 1)
+        if (q[k] == "s") { if (c == "\047") q[k] = ""; else w[k] = w[k] c; continue }
+        if (q[k] == "A") { if (c == "\\") { w[k] = w[k] d; i++ } else if (c == "\047") q[k] = ""; else w[k] = w[k] c; continue }
+        if (q[k] == "d") {
+          if (c == "\"") { q[k] = ""; continue }
+          if (c == "\\") { w[k] = w[k] d; i++; continue }
+          if (c == "`") { w[k] = w[k] "$"; push("`"); continue }
+          if (c == "$" && d == "(") { w[k] = w[k] "$"; if (substr(s, i + 2, 1) == "(") { i += 2; push("a") } else { i++; push(")") } continue }
+          w[k] = w[k] c; continue
+        }
+        if (op[k] == "a") {   # $(( )) or (( )): only the parens matter
+          if (c == "(") ad[k]++
+          else if (c == ")") { if (ad[k] > 0) ad[k]--; else if (d == ")") { i++; k-- } }
+          continue
+        }
+        if (c == "\\") { if (d != "\n") { w[k] = w[k] d; ws[k] = 1 } i++; continue }
+        if (c == "\047") { q[k] = "s"; ws[k] = 1; continue }
+        if (c == "\"") { q[k] = "d"; ws[k] = 1; continue }
+        if (c == "$" && d == "\047") { q[k] = "A"; ws[k] = 1; i++; continue }
+        if (c == "$" && d == "(") { w[k] = w[k] "$"; ws[k] = 1; if (substr(s, i + 2, 1) == "(") { i += 2; push("a") } else { i++; push(")") } continue }
+        if (c == "`") { if (op[k] == "`") pop(); else { w[k] = w[k] "$"; ws[k] = 1; push("`") } continue }
+        if (c == "#" && !ws[k]) { e = index(substr(s, i), "\n"); if (!e) break; i += e - 2; continue }
+        if (c == " " || c == "\t") { endw(k); continue }
+        if (c == "\n") { endc(k); if (nh) i = skiphd(i); continue }
+        if (c == ";") { endc(k); continue }
+        if (c == "&" && d != ">") { endc(k); if (d == "&") i++; continue }
+        if (c == "|") { endc(k); if (d == "|" || d == "&") i++; continue }
+        if (c == "(") { if (!ws[k] && d == "(") { i++; push("a") } else { endc(k); push(")") } continue }
+        if (c == ")") { if (op[k] == ")") pop(); continue }
+        if (c == "&") { endw(k); i++; c = ">"; d = substr(s, i + 1, 1) }   # &> and &>> — both streams to a file
+        if (c == ">" || c == "<") {
+          if (dbr[k]) { endw(k); continue }   # [[ a > b ]] compares strings
+          if (ws[k] && w[k] ~ /^[0-9]+$/) { w[k] = ""; ws[k] = 0 } else endw(k)   # 2> · 1>> : the number is the fd
+          if (d == "(") { i++; push(")"); continue }   # >( … ) <( … ) process substitution
+          if (c == "<") {
+            if (d == "<" && substr(s, i + 2, 1) == "<") { i += 2; pr[k] = 2; continue }   # <<< herestring
+            if (d == "<") {
+              i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+              while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+              dl = ""
+              while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;&|<>()]/) break; if (e != "\047" && e != "\"" && e != "\\") dl = dl e; i++ }
+              hd[++nh] = dl; hdash[nh] = dash; continue
+            }
+            if (d == "&") { i++; continue }   # <&N
+            pr[k] = 2; continue
+          }
+          if (d == ">" || d == "|") { i++; d = substr(s, i + 1, 1) }
+          if (d == "&") { i++; if (match(substr(s, i + 1), /^([0-9]+-?|-)/)) { i += RLENGTH; continue } }   # >&2 dup, not a file
+          pr[k] = 1; continue
+        }
+        w[k] = w[k] c; ws[k] = 1
+      }
+      for (; k > 0; k--) endc(k)
+      endc(0)
+    }' | { grep -vE '^(/dev/|&)|[$`~*]' || true; } | sort -u
 }
 _gate_rel() {   # $1 path (absolute or relative) $2 base directory → the project-relative path, or an empty string if outside
   local p="$1"
