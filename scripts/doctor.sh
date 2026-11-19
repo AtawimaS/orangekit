@@ -2400,6 +2400,13 @@ SKCASES
 2|data-modeling.md|Bash|cd migrations && sed -i '' 's/int/bigint/' 0001_init.sql|none|s24|[norunner] B12 sed after `cd` into the project → resolved against that cd, blocked
 2|data-modeling.md|Bash|cd src/.. && sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s25|[norunner] B12 `..` in a cd is folded → still the project's file, blocked
 0|-|Bash|cd "$D" && sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s26|[norunner] B12 a cd that cannot be followed → skipped, not guessed
+0|-|Bash|cd migrations && python3 -c "import sys; print(sys.argv[1]>230)" 5|none|s27|[norunner] B23 a `>` inside a quoted argument is not a redirect → pass
+0|-|Bash|sed -i '' -e 's/a migrations/0011_x.sql b/c/' -e 's/d/e/' notes.md|none|s28|[norunner] B23 a sed expression with spaces is not a file operand → pass
+0|-|Bash|cd migrations && python3 - <<'E'\nd = { 'a': 1 }\nprint(2 > 1)\nE|none|s29|[norunner] B23 a heredoc body to python is never a target (guard, passed before too) → pass
+2|data-modeling.md|Bash|sed -i '' -e 's/int/bigint/' migrations/0001_init.sql|none|s30|[norunner] B23 BSD `sed -i '' -e` → the file operand is the target, blocked
+2|data-modeling.md|Bash|echo x > "migrations/0012_y.sql"|none|s31|[norunner] B23 a quoted redirect target is still a target, blocked
+2|data-modeling.md|Bash|ls | tee migrations/0013_z.sql|none|s32|[norunner] B23 a tee operand is a target, blocked
+2|data-modeling.md|Bash|psql -f x.sql 2> migrations/0014_w.sql|none|s33|[norunner] B23 `2> file` writes the file, blocked
 2|test-driven-development|Write|src/server/points.ts|code|s1|[runner] test runner present · new behavior code · TDD not called → blocked
 0|-|Write|src/server/points.ts|code-tdd|s2|[runner] TDD skill called → pass
 0|-|Write|src/server/points.test.ts|code|s3|[runner] a test file → TDD not required
