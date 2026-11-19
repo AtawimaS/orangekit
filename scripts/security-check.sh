@@ -274,7 +274,7 @@ _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → 
   [ ${#names[@]} -gt 0 ] || return 0
   local tp sid state list
   tp=$F_TP; _clean_sid sid "$F_SID"
-  # Undecidable — no transcript · no jq · or the time budget is spent (an advisory gate must not run the hook into its 15 s timeout)
+  # Undecidable — no transcript · no jq · or the time budget is spent (an advisory gate must not run the hook into its hook timeout)
   if [ -z "$tp" ] || [ ! -f "$tp" ] || ! command -v jq >/dev/null 2>&1 || [ "$SECONDS" -ge "$KG_DEADLINE" ]; then
     list=$(for i in "${!names[@]}"; do [ "${kinds[$i]}" = card ] && printf '  - Read .claude/rules/%s\n' "${names[$i]}" || printf '  - skill /%s\n' "${names[$i]}"; done)
     _kg_note "Load these before writing \`$rel\` (it cannot be determined whether they were loaded in this session, so this does not block):

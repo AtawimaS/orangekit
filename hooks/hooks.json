@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/security-check.sh\"",
-            "timeout": 15
+            "timeout": 60
           }
         ]
       }
