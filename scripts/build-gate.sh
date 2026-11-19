@@ -78,8 +78,11 @@ SRC_CHANGED=$(grep <<<"$CHANGED" -E '\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|s
 # No index file could be written at all (no writable state dir and no temp dir): read as "transcript cannot be read" — do not block
 orangekit_transcript_index "$TRANSCRIPT" "$SESSION_ID" || exit 0
 _session_touched() {   # the T lines of the index = the old pass: "E<TAB>file" · "B<TAB>cwd<TAB>command (newlines as \037)"
+  # Every awk here runs with LC_ALL=C (B22): macOS awk aborted ("towc: multibyte conversion failure") on a regex over one byte
+  # of `>é` / `<→` in a command and exited the Stop hook 2. Per call, not an awk() wrapper: under bash 3.2 an awk exiting 1
+  # two functions deep (_verification_ran's "not found") fires the ERR trap even from an `&&`
   ORANGEKIT_SRC_LIST="$SRC_CHANGED" ORANGEKIT_ROOTS="$ORANGEKIT_ROOT
-$(cd "$ORANGEKIT_ROOT" 2>/dev/null && pwd -P)" awk '
+$(cd "$ORANGEKIT_ROOT" 2>/dev/null && pwd -P)" LC_ALL=C awk '
     substr($0, 1, 2) != "T\t" { next }
     { $0 = substr($0, 3) }
     # A bounded mention — look at the characters on both sides so `a.ts` does not match inside `data.tsx`
@@ -285,7 +288,7 @@ fi
 # itself, so no writer can die of SIGPIPE when it exits early (that 141 under pipefail once read "ran" as "did not run" and
 # blocked almost every turn of a long session — consumer report 2026-10-23~28).
 _verification_ran() {
-  awk '
+  LC_ALL=C awk '
     substr($0, 1, 2) != "V\t" { next }
     { $0 = substr($0, 3) }
     function head(s) {
@@ -329,7 +332,7 @@ _ui_render_notice() {
   # A trace that the render was checked — a probe or browser-automation Bash call, or a built-in /run skill call.
   # Not the presence of a string but **an actual tool call** (the lesson of v2's stop-guard).
   # The U lines of the transcript index (Bash commands and Skill names, as the old pass printed them), into the same grep
-  if { awk 'substr($0, 1, 2) == "U\t" { print substr($0, 3) }' "$ORANGEKIT_TI" 2>/dev/null || true; } \
+  if { LC_ALL=C awk 'substr($0, 1, 2) == "U\t" { print substr($0, 3) }' "$ORANGEKIT_TI" 2>/dev/null || true; } \
      | grep -qiE '(ui-probe|playwright|puppeteer|chromium|(^|:)run$)'; then
     return 0
   fi

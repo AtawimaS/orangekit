@@ -582,6 +582,20 @@ codes=$(cat "$T"/wc[0-5] | tr '\n' ' ')
 tsc warm3; want "the cache remains correct after the warm-up race" 0
 [ "$(committed)" = "$(size "$TX")" ] && ok "TI raced cache commits all appended lines" || nok "TI warm race offset" "$(committed) != $(size "$TX")"
 
+# ── B22 build-gate under a UTF-8 locale: a `>é` in a command made macOS awk abort and the Stop hook exit 2 ──
+U8=$(locale -a 2>/dev/null | grep -iE '^(c|en_us)\.utf-?8$' | head -1 || true)
+if [ -n "$U8" ]; then
+  P="$T/b22"; proj "$P"; echo 'export {}' > "$P/src/a.ts"; (cd "$P" && git add -A && git -c user.email=t@x -c user.name=t commit -qm a)
+  echo 'export const x = 1' > "$P/src/a.ts"; : > "$P/.st/session-baseline.txt"
+  { tu Edit "{\"file_path\":\"$P/src/a.ts\",\"old_string\":\"{}\",\"new_string\":\"x\"}"; tu Bash '{"command":"echo hi >é.txt; grep x <→y"}'; } > "$T/b22.jsonl"
+  LC_ALL=$U8 bg "$P" "$T/b22.jsonl"
+  case "$BG" in *'"continue": false'*|*'"continue":false'*) ok "B22 a non-ASCII redirect target does not crash build-gate ($U8): blocked without tests" ;;
+    *) nok "B22 build-gate under $U8" "no block JSON (crashed?): $(printf '%s' "$BG" | head -c 100)" ;; esac
+  tu Bash '{"command":"npx vitest run >→.log"}' >> "$T/b22.jsonl"; LC_ALL=$U8 bg "$P" "$T/b22.jsonl"
+  case "$BG" in *'"continue": false'*|*'"continue":false'*) nok "B22b tests that ran" "blocked: $(printf '%s' "$BG" | head -c 100)" ;;
+    *) ok "B22b the same session after a test run passes ($U8)" ;; esac
+else ok "B22 skipped — no UTF-8 locale on this machine"; fi
+
 # ── B24 a big heredoc before a relative redirect: bash 3.2's ${x//…} over it took 29 s (8 KB) and timed the hook out ──
 P="$T/b24"; proj "$P"
 b24=$(awk 'BEGIN { for (i = 0; i < 180; i++) printf "s = s.replace(\047a > b\047, \"x{%d}\")  # \047q\047 > \"r\"\n", i }')
