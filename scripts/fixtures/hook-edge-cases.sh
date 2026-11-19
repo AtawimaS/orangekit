@@ -582,5 +582,15 @@ codes=$(cat "$T"/wc[0-5] | tr '\n' ' ')
 tsc warm3; want "the cache remains correct after the warm-up race" 0
 [ "$(committed)" = "$(size "$TX")" ] && ok "TI raced cache commits all appended lines" || nok "TI warm race offset" "$(committed) != $(size "$TX")"
 
+# ── B24 a big heredoc before a relative redirect: bash 3.2's ${x//…} over it took 29 s (8 KB) and timed the hook out ──
+P="$T/b24"; proj "$P"
+b24=$(awk 'BEGIN { for (i = 0; i < 180; i++) printf "s = s.replace(\047a > b\047, \"x{%d}\")  # \047q\047 > \"r\"\n", i }')
+s0=$SECONDS; sc "$P" "$(bash_in b24 "" "$P" "python3 - <<'EOF'
+$b24
+EOF
+echo done > notes.txt")"
+[ "$SC" = 0 ] && [ $((SECONDS - s0)) -le 5 ] && ok "B24 an 8 KB heredoc + a relative redirect is checked in $((SECONDS - s0)) s" \
+  || nok "B24 big heredoc" "exit $SC in $((SECONDS - s0)) s (limit 5)"
+
 echo "pass $pass fail $fail"
 [ "$fail" -eq 0 ]

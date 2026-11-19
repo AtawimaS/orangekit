@@ -247,8 +247,10 @@ _norm_v() {   # $1 variable  $2 absolute path → the path with `.` and `..` seg
 }
 _cd_base_v() {   # $1 variable  $2 command text before a target  $3 start directory → the directory after its last `cd`/`pushd`;
   # returns 1 when that `cd` cannot be followed (no argument · `-` · `~` · a variable or substitution) — skip rather than guess (B12)
-  local w base="$3" next=0 arg words=()
-  read -r -d '' -a words <<<"${2//[;&|()]/ ; }" || true   # read, not `for w in $cmd`: no glob expansion
+  local w base="$3" next=0 arg words=() t
+  # _plain text in bash; a long one through sed — ${x//…/…} on the 8 KB heredoc before a `> out` took 29 s (the hook timed out)
+  if _plain "$2"; then t=${2//[;&|()]/ ; }; else t=$(printf '%s' "$2" | sed 's/[;&|()]/ ; /g'); fi
+  read -r -d '' -a words <<<"$t" || true   # read, not `for w in $cmd`: no glob expansion
   for w in ${words[@]+"${words[@]}"}; do
     if [ "$next" = 1 ]; then
       next=0; [ "$w" = ";" ] && return 1
