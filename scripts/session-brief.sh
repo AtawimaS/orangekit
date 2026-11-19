@@ -539,5 +539,7 @@ fi
 # indexes (common.sh orangekit_transcript_index) of sessions untouched for a week, plus private copies a killed hook left behind
 orangekit_rotate_logs
 find "$(orangekit_state_dir)" -maxdepth 1 -name 'transcript-index.*' -mtime +7 -delete 2>/dev/null || true
+# security-check's finished-run marks (empty inflight.<pid>, E13); a full one is a cut-off run still to be reported
+find "$(orangekit_state_dir)" -maxdepth 1 -name 'inflight.*' -empty -delete 2>/dev/null || true
 
 exit 0

@@ -48,6 +48,13 @@ orangekit_on_err() {
 }
 trap 'orangekit_on_err $LINENO' ERR
 
+# ── EXIT handlers — a second `trap … EXIT` replaces the first, so every part of a hook registers here instead ──
+_OK_EXIT_FNS=""; _OK_EXIT_SUB=""
+# A subshell (`$( )`) starts its own list — an inherited one would run the parent's handlers inside it too. BASH_SUBSHELL is
+# read here, at registration: bash 3.2 reports 0 inside the trap itself
+orangekit_on_exit() { [ "$_OK_EXIT_SUB" = "$BASH_SUBSHELL" ] || { _OK_EXIT_FNS=""; _OK_EXIT_SUB=$BASH_SUBSHELL; }; case " $_OK_EXIT_FNS " in *" $1 "*) ;; *) _OK_EXIT_FNS+=" $1" ;; esac; trap '_orangekit_run_exit' EXIT; }
+_orangekit_run_exit() { local f; for f in $_OK_EXIT_FNS; do "$f" || true; done; }
+
 # ── Project root resolution ───────────────────────────────────────────
 # Priority: CLAUDE_PROJECT_DIR → stdin .cwd → git toplevel → fail
 # **Does not guess.** If it cannot be found, block with exit 2 (anti-goal 1).
@@ -587,6 +594,6 @@ orangekit_transcript_index() {
   else
     _OK_TI_PUB=$tmp; _OK_TI_DEST=""
   fi
-  trap '_orangekit_ti_publish' EXIT
+  orangekit_on_exit _orangekit_ti_publish
   return 0
 }

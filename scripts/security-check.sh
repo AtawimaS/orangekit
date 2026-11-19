@@ -36,6 +36,46 @@ orangekit_slashes_v FILE_PATH "$FILE_PATH"   # C:\…\a.ts → C:/…/a.ts (Wind
 # The heartbeat comes right after the field read, which also gives it its timestamp (no `date` exec)
 [ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ] && orangekit_heartbeat 0
 
+# ── Cut-off runs (E13) ── Claude Code kills a hook that passes its timeout and runs the action unchecked, without naming it.
+# Each run writes what it checks to inflight.<pid> and empties it on the way out; a full file whose pid is gone belonged to a
+# killed run, and the next run names that action. No deadline guess, so nothing to tune per OS or machine speed.
+SC_NOTES=""; _OK_IF=""
+if [ -n "$ORANGEKIT_ROOT" ] && [ "${1:-}" != "--owning" ] && [ "${1:-}" != "--scratch-db" ]; then
+  _if_dir=${ORANGEKIT_STATE_DIR:-$ORANGEKIT_ROOT/.claude/.orangekit}
+  _ifn=0
+  for _if in "$_if_dir"/inflight.*; do
+    _ifn=$((_ifn + 1)); [ -s "$_if" ] || continue
+    # shortcut: a recycled pid that a live process owns hides that one report; rare, upgrade if it is ever seen
+    kill -0 "${_if##*.}" 2>/dev/null && continue   # still running: a parallel tool call
+    _ift="" _iftool="" _iftgt=""; IFS=$'\t' read -r _ift _iftool _iftgt < "$_if" || true
+    [ -n "$_iftool" ] || continue   # emptied between the size check and the read: that run finished
+    : > "$_if" 2>/dev/null || true
+    SC_NOTES+="${SC_NOTES:+$'\n'}⚠️ An earlier security-check did not finish (started $_ift): the hook timeout cut it off — usually an overloaded machine — or it crashed. Claude Code may have run that action without a full check: ${_iftool:-?} → ${_iftgt:-?}"
+    orangekit_heartbeat cutoff "${_iftool:-?} → ${_iftgt:0:120}"
+  done
+  # finished marks pile up one per call until the next session start; past 64 one find clears them (one fork per ~64 calls,
+  # where scanning 5,000 of them cost every call ~125 ms)
+  [ "$_ifn" -le 64 ] || find "$_if_dir" -maxdepth 1 -name 'inflight.*' -empty -delete 2>/dev/null || true
+  [ -z "$SC_NOTES" ] || printf '%s\n' "$SC_NOTES" >&2   # a block (exit 2) shows only stderr
+  # cut before replacing: bash 3.2's ${x//[…]/ } grows ~cubically (8 KB heredoc = 27 s) and ran the hook into its own timeout
+  _sc_tgt=${FILE_PATH:-$F_CMD}; _sc_tgt=${_sc_tgt:0:200}; _sc_tgt=${_sc_tgt//[$'\n\r\t']/ }
+  if printf '%s\t%s\t%s\n' "${_OK_NOW:-?}" "${TOOL_NAME:-?}" "${_sc_tgt:0:200}" > "$_if_dir/inflight.$$" 2>/dev/null; then
+    _OK_IF="$_if_dir/inflight.$$"
+  fi
+  _sc_exit() {   # the notes not printed yet, then mark this run finished (a kill from the timeout leaves the mark)
+    local n=${KG_NOTES-$SC_NOTES}; KG_NOTES=""; SC_NOTES=""
+    [ -z "$n" ] || orangekit_emit_context PreToolUse "$n"
+    # only an end through `exit` empties the mark; a kill and a crash past the ERR trap (a syntax or unbound-variable error)
+    # both keep it — bash 3.2 cannot tell them apart ($? in this trap is 0 or 1 after a TERM), and either way the action may
+    # have run unchecked
+    [ -z "${_SC_DONE:-}" ] || [ -z "$_OK_IF" ] || : > "$_OK_IF" 2>/dev/null || true
+  }
+  orangekit_on_exit _sc_exit
+  # Every end of this hook goes through `exit` (_kg_done, the gates, the ERR trap); a kill does not, so its mark stays full.
+  # Not a TERM trap: bash defers a trapped TERM until a foreground child ends, and a kill must end the hook at once
+  exit() { _SC_DONE=1; builtin exit "$@"; }
+fi
+
 # Avoid self-reference when this hook itself is being handled (the pattern strings match themselves)
 [[ "$FILE_PATH" =~ security-check\.sh$ ]] && exit 0
 
@@ -119,7 +159,7 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
       if (v == "]]") dbr[k] = 0
       cw[k, ++nw[k]] = v
     }
-    function endc(k,   j, a, c, b, wrap, inpl, sg, st, eo, m, ch, rest) {
+    function endc(k,   j, a, c, b, wrap, inpl, sg, st, eo, m, ch, rest, t, f) {
       endw(k); pr[k] = 0; dbr[k] = 0
       c = 0; wrap = 0
       for (j = 1; j <= nw[k]; j++) {
@@ -129,9 +169,26 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
         if (wrap && a ~ /^-/) continue
         c = j; break
       }
+      if (c) {   # a string a shell runs again is tokenized in the next pass (END): eval …, ssh host …
+        b = cw[k, c]; sub(/.*\//, "", b)
+        if (b == "eval") { for (j = c + 1; j <= nw[k]; j++) subq = subq cw[k, j] " "; subq = subq "\n" }
+        else if (b == "ssh") {
+          for (j = c + 1; j <= nw[k] && cw[k, j] ~ /^-/; j++) if (cw[k, j] ~ /^-[BbcDEeFIiJLlmOopQRSWw]$/) j++
+          for (j++; j <= nw[k]; j++) subq = subq cw[k, j] " "; subq = subq "\n"
+        }
+      }
+      # tee · sed · a shell with -c anywhere in the words: after the option argument of a wrapper (sudo -u x, nice -n 10, timeout 5,
+      # xargs -n 1), docker exec, find -exec — the first word alone missed those (review of B23)
+      f = 0
+      for (t = (c ? c : 1); t <= nw[k]; t++) {
+        b = cw[k, t]; sub(/.*\//, "", b)
+        if (b == "tee" || b == "sed" || b == "gsed") { f = t; break }
+        if (b ~ /^(ba|z|da)?sh$/) for (j = t + 1; j < nw[k]; j++) if (cw[k, j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { subq = subq cw[k, j + 1] "\n"; break }
+      }
+      c = f
       if (c) {
         b = cw[k, c]; sub(/.*\//, "", b)
-        if (b == "tee") { for (j = c + 1; j <= nw[k]; j++) if (cw[k, j] !~ /^-/ && cw[k, j] != "") print cw[k, j] }
+        if (b == "tee") { for (j = c + 1; j <= nw[k]; j++) if (cw[k, j] !~ /^-/ && cw[k, j] != "" && cw[k, j] !~ /^(;|\+|\{\})$/) print cw[k, j] }
         else if (b == "sed" || b == "gsed") {
           inpl = 0; sg = 0; st = 0; eo = 0
           for (j = c + 1; j <= nw[k]; j++) {
@@ -171,8 +228,8 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
       nh = 0
       return p - 1
     }
-    END {
-      n = length(s); k = 0; op[0] = ""; q[0] = ""
+    function run(str) {
+      s = str; n = length(s); k = 0; nh = 0; op[0] = ""; q[0] = ""; w[0] = ""; ws[0] = 0; nw[0] = 0; pr[0] = 0; ad[0] = 0; dbr[0] = 0
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1); d = substr(s, i + 1, 1)
         if (q[k] == "s") { if (c == "\047") q[k] = ""; else w[k] = w[k] c; continue }
@@ -196,7 +253,7 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
         if (c == "$" && d == "(") { w[k] = w[k] "$"; ws[k] = 1; if (substr(s, i + 2, 1) == "(") { i += 2; push("a") } else { i++; push(")") } continue }
         if (c == "`") { if (op[k] == "`") pop(); else { w[k] = w[k] "$"; ws[k] = 1; push("`") } continue }
         if (c == "#" && !ws[k]) { e = index(substr(s, i), "\n"); if (!e) break; i += e - 2; continue }
-        if (c == " " || c == "\t") { endw(k); continue }
+        if (c == " " || c == "\t" || c == "\r") { endw(k); continue }
         if (c == "\n") { endc(k); if (nh) i = skiphd(i); continue }
         if (c == ";") { endc(k); continue }
         if (c == "&" && d != ">") { endc(k); if (d == "&") i++; continue }
@@ -228,7 +285,8 @@ _bash_targets() {   # $1 command → the file paths it writes (one per line). He
       }
       for (; k > 0; k--) endc(k)
       endc(0)
-    }' | { grep -vE '^(/dev/|&)|[$`~*]' || true; } | sort -u
+    }
+    END { str = s; for (pass = 0; pass < 3 && str != ""; pass++) { subq = ""; run(str); str = subq } }' | { grep -vE '^(/dev/|&)|[$`~*]' || true; } | sort -u
 }
 _gate_rel() {   # $1 path (absolute or relative) $2 base directory → the project-relative path, or an empty string if outside
   local p="$1"
@@ -379,7 +437,7 @@ _clean_sid() {
     *) printf -v "$1" '%s' "$2" ;;
   esac
 }
-KG_NOTES=""
+KG_NOTES=$SC_NOTES   # a cut-off notice rides in the same single JSON as the knowledge-gate notes
 _kg_note() { KG_NOTES+="${KG_NOTES:+$'\n\n'}$1"; }   # collect, do not print one JSON per target — hook stdout must be a single JSON object
 _kg_flush() { [ -z "$KG_NOTES" ] || orangekit_emit_context PreToolUse "$KG_NOTES"; KG_NOTES=""; }
 _knowledge_gate() {   # $1 project-relative path  $2 1=new file 0=existing  → exit 2 if it blocks
@@ -474,7 +532,7 @@ fi
 # (a transcript pass), and it used to run first: a long transcript ran the hook into its 15 s timeout, or one unparseable
 # transcript line killed it, and a `DROP TABLE` or a hardcoded key in the same call was never judged (consumer report B7 · N1).
 # A blocking gate must never depend on an advisory one finishing.
-KG_SEEN=""; case "${ORANGEKIT_KG_BUDGET:-8}" in ''|*[!0123456789]*) KG_DEADLINE=$((SECONDS + $(orangekit_num "${ORANGEKIT_KG_BUDGET:-8}"))) ;; *) _kgb=${ORANGEKIT_KG_BUDGET:-8}; KG_DEADLINE=$((SECONDS + ${_kgb:0:18})) ;; esac   # = orangekit_num for plain digits, without its fork   # seconds of the 15 s hook timeout, counted from hook start; past it → undecidable notice
+KG_SEEN=""; case "${ORANGEKIT_KG_BUDGET:-8}" in ''|*[!0123456789]*) KG_DEADLINE=$((SECONDS + $(orangekit_num "${ORANGEKIT_KG_BUDGET:-8}"))) ;; *) _kgb=${ORANGEKIT_KG_BUDGET:-8}; KG_DEADLINE=$((SECONDS + ${_kgb:0:18})) ;; esac   # = orangekit_num for plain digits, without its fork   # seconds of the hook timeout (hooks.json), counted from hook start; past it → undecidable notice
 _kg_run() {
   if [ "$TOOL_NAME" = "Write" ] && [ -n "$FILE_PATH" ] && [ ! -e "$FILE_PATH" ]; then
     _knowledge_gate "$(_gate_rel "$FILE_PATH" "$ORANGEKIT_ROOT")" 1

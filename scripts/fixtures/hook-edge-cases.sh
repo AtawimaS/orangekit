@@ -606,5 +606,48 @@ echo done > notes.txt")"
 [ "$SC" = 0 ] && [ $((SECONDS - s0)) -le 5 ] && ok "B24 an 8 KB heredoc + a relative redirect is checked in $((SECONDS - s0)) s" \
   || nok "B24 big heredoc" "exit $SC in $((SECONDS - s0)) s (limit 5)"
 
+# ── E13 cut-off runs: a run the hook timeout killed is named by the next run ─────────────────────────────────
+proj "$T/co"; CO="$T/co"
+COB='{"tool_name":"Bash","tool_input":{"command":"ls src"},"cwd":"'"$CO"'"}'
+sc "$CO" "$COB"
+cof=$(ls "$CO/.st"/inflight.* 2>/dev/null | head -1)
+[ "$SC" = 0 ] && [ -n "$cof" ] && [ ! -s "$cof" ] && ! grep -q 'did not finish' "$T/o" \
+  && ok "CO1 a finished run leaves an empty mark and no notice" || nok "CO1 finished run" "exit $SC · mark '${cof:-none}' $( [ -s "$cof" ] && echo full) · $(head -c 120 "$T/o")"
+printf '2026-01-01T00:00:00Z\tBash\tpsql -c "DROP TABLE users"\n' > "$CO/.st/inflight.999999"   # a pid no process has
+sc "$CO" "$COB"
+if [ "$SC" = 0 ] && jqb -e '.hookSpecificOutput.additionalContext | test("did not finish") and test("DROP TABLE users")' "$T/o" >/dev/null 2>&1 \
+   && [ ! -s "$CO/.st/inflight.999999" ] && grep -q '^security-check|[^|]*|[^|]*|cutoff|Bash' "$CO/.st/hookrun.log"; then
+  ok "CO2 a killed run's mark is named once in one JSON, emptied and logged as cutoff"
+else nok "CO2 killed run report" "exit $SC · out: $(head -c 160 "$T/o") · mark: $(cat "$CO/.st/inflight.999999") · log: $(grep -c cutoff "$CO/.st/hookrun.log")"; fi
+sc "$CO" "$COB"; grep -q 'did not finish' "$T/o" && nok "CO2b reported twice" "$(head -c 120 "$T/o")" || ok "CO2b the cut-off is reported only once"
+printf 'x\tBash\tparallel\n' > "$CO/.st/inflight.$$"   # this test shell is alive: a run still in progress
+sc "$CO" "$COB"
+! grep -q 'parallel' "$T/o" && [ -s "$CO/.st/inflight.$$" ] && ok "CO3 a live run's mark is left alone" || nok "CO3 live run" "$(head -c 120 "$T/o")"
+: > "$CO/.st/inflight.$$"
+mkdir -p "$T/coshim"; RAWK=$(command -v awk)
+printf '#!/usr/bin/env bash\nsleep 2\nexec "%s" "$@"\n' "$RAWK" > "$T/coshim/awk"; chmod +x "$T/coshim/awk"
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git status && ls"},"cwd":"'"$CO"'"}' > "$T/cop"
+(cd "$CO" && PATH="$T/coshim:$PATH" CLAUDE_PLUGIN_ROOT="$R" CLAUDE_PROJECT_DIR="$CO" ORANGEKIT_STATE_DIR="$CO/.st" \
+  exec bash "$R/scripts/security-check.sh" < "$T/cop" >/dev/null 2>&1) & cop=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CO/.st/inflight.$cop" ] && break; sleep 0.2; done
+kill -TERM "$cop" 2>/dev/null; wait "$cop" 2>/dev/null; cterm=$?
+if [ -s "$CO/.st/inflight.$cop" ]; then
+  sc "$CO" "$COB"
+  grep -q 'git status' "$T/o" && ok "CO4 a SIGTERM mid-check keeps the mark and the next run names it (exit $cterm)" \
+    || nok "CO4 next run after TERM" "$(head -c 160 "$T/o")"
+else nok "CO4 SIGTERM mid-check" "mark not left (exit $cterm, file: $(ls "$CO/.st" | tr '\n' ' '))"; fi
+for i in $(seq 1 70); do : > "$CO/.st/inflight.$((900000 + i))"; done   # finished marks a long session leaves behind
+printf 'x\tBash\tstill running\n' > "$CO/.st/inflight.$$"
+sc "$CO" "$COB"
+[ "$SC" = 0 ] && [ "$(ls "$CO/.st" | grep -c '^inflight\.9000')" = 0 ] && [ -s "$CO/.st/inflight.$$" ] \
+  && ok "CO5 past 64 marks the finished ones are cleared; a live run's mark stays" || nok "CO5 mark cleanup" "$(ls "$CO/.st" | grep -c inflight) marks left"
+: > "$CO/.st/inflight.$$"
+
+# a subshell starts its own EXIT-handler list: the transcript-index pass in `$( )` must not run the hook's own handler there
+co7=$(bash -c 'source "$1/scripts/lib/common.sh" 2>/dev/null; trap - ERR; set +e
+  f1() { echo "f1 in $BASH_SUBSHELL"; }; f2() { echo "f2 in sub"; }
+  orangekit_on_exit f1; x=$(orangekit_on_exit f2; :); printf "%s|" "$x"' _ "$R")
+[ "$co7" = "f2 in sub|f1 in 0" ] && ok "CO7 a subshell runs only the EXIT handlers it registered itself" || nok "CO7 subshell handlers" "$co7"
+
 echo "pass $pass fail $fail"
 [ "$fail" -eq 0 ]

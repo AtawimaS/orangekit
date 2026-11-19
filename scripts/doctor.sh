@@ -2407,6 +2407,12 @@ SKCASES
 2|data-modeling.md|Bash|echo x > "migrations/0012_y.sql"|none|s31|[norunner] B23 a quoted redirect target is still a target, blocked
 2|data-modeling.md|Bash|ls | tee migrations/0013_z.sql|none|s32|[norunner] B23 a tee operand is a target, blocked
 2|data-modeling.md|Bash|psql -f x.sql 2> migrations/0014_w.sql|none|s33|[norunner] B23 `2> file` writes the file, blocked
+2|data-modeling.md|Bash|sudo -u deploy tee migrations/0015_a.sql|none|s34|[norunner] B23 review: tee after a wrapper with an option argument is still a target, blocked
+2|data-modeling.md|Bash|nice -n 10 sed -i '' 's/int/bigint/' migrations/0001_init.sql|none|s35|[norunner] B23 review: sed -i after `nice -n 10`, blocked
+2|data-modeling.md|Bash|bash -c "echo x > migrations/0017_c.sql"|none|s36|[norunner] B23 review: a redirect inside `bash -c` is tokenized again, blocked
+2|data-modeling.md|Bash|eval 'echo x > migrations/0018_d.sql'|none|s37|[norunner] B23 review: a redirect inside `eval`, blocked
+2|data-modeling.md|Bash|docker exec c sh -c 'echo x >> migrations/0019_e.sql'|none|s38|[norunner] B23 review: `sh -c` after other words, blocked
+0|-|Bash|cd migrations && bash -c "python3 -c 'print(1>2)'"|none|s39|[norunner] B23 review: quoted code inside `bash -c` is still not a redirect → pass
 2|test-driven-development|Write|src/server/points.ts|code|s1|[runner] test runner present · new behavior code · TDD not called → blocked
 0|-|Write|src/server/points.ts|code-tdd|s2|[runner] TDD skill called → pass
 0|-|Write|src/server/points.test.ts|code|s3|[runner] a test file → TDD not required
